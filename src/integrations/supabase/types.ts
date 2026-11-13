@@ -14,6 +14,104 @@ export type Database = {
   }
   public: {
     Tables: {
+      franchises: {
+        Row: {
+          created_at: string
+          id: string
+          master_franchise_id: string
+          name: string
+          status: string
+          territory_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          master_franchise_id: string
+          name: string
+          status?: string
+          territory_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          master_franchise_id?: string
+          name?: string
+          status?: string
+          territory_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "franchises_master_franchise_id_fkey"
+            columns: ["master_franchise_id"]
+            isOneToOne: false
+            referencedRelation: "master_franchises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "franchises_territory_master_fkey"
+            columns: ["master_franchise_id", "territory_id"]
+            isOneToOne: false
+            referencedRelation: "master_franchise_territories"
+            referencedColumns: ["master_franchise_id", "id"]
+          },
+        ]
+      }
+      master_franchise_territories: {
+        Row: {
+          created_at: string
+          id: string
+          master_franchise_id: string
+          territory: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          master_franchise_id: string
+          territory: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          master_franchise_id?: string
+          territory?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "master_franchise_territories_master_franchise_id_fkey"
+            columns: ["master_franchise_id"]
+            isOneToOne: false
+            referencedRelation: "master_franchises"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      master_franchises: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           user_id: string
@@ -131,26 +229,46 @@ export type Database = {
       memberships: {
         Row: {
           created_at: string
+          franchise_id: string | null
           id: string
+          master_franchise_id: string | null
           role: Database["public"]["Enums"]["app_role"]
           school_id: string | null
           user_id: string
         }
         Insert: {
           created_at?: string
+          franchise_id?: string | null
           id?: string
+          master_franchise_id?: string | null
           role: Database["public"]["Enums"]["app_role"]
           school_id?: string | null
           user_id: string
         }
         Update: {
           created_at?: string
+          franchise_id?: string | null
           id?: string
+          master_franchise_id?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           school_id?: string | null
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "memberships_franchise_id_fkey"
+            columns: ["franchise_id"]
+            isOneToOne: false
+            referencedRelation: "franchises"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memberships_master_franchise_id_fkey"
+            columns: ["master_franchise_id"]
+            isOneToOne: false
+            referencedRelation: "master_franchises"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "memberships_school_id_fkey"
             columns: ["school_id"]
@@ -198,6 +316,7 @@ export type Database = {
           code: string
           created_at: string
           created_by: string | null
+          franchise_id: string | null
           id: string
           name: string
           state: string
@@ -210,6 +329,7 @@ export type Database = {
           code: string
           created_at?: string
           created_by?: string | null
+          franchise_id?: string | null
           id?: string
           name: string
           state?: string
@@ -222,12 +342,21 @@ export type Database = {
           code?: string
           created_at?: string
           created_by?: string | null
+          franchise_id?: string | null
           id?: string
           name?: string
           state?: string
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "schools_franchise_id_fkey"
+            columns: ["franchise_id"]
+            isOneToOne: false
+            referencedRelation: "franchises"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       staff_invites: {
         Row: {
@@ -369,6 +498,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_access_franchise: { Args: { _franchise_id: string }; Returns: boolean }
+      can_access_master_franchise: { Args: { _master_franchise_id: string }; Returns: boolean }
+      can_access_school_network: { Args: { _school_id: string }; Returns: boolean }
       can_view_school_members: {
         Args: { _school_id: string }
         Returns: boolean

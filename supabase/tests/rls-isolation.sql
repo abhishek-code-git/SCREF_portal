@@ -12,11 +12,31 @@ insert into public.schools (id, code, name) values
   ('11111111-1111-1111-1111-111111111111', 'TEST-A', 'Test School A'),
   ('22222222-2222-2222-2222-222222222222', 'TEST-B', 'Test School B');
 
-insert into public.memberships (user_id, school_id, role) values
-  ('aaaaaaaa-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'school_principal'),
-  ('bbbbbbbb-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'school_principal'),
-  ('eeeeeeee-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'franchise_owner'),
-  ('cccccccc-0000-0000-0000-000000000001', null, 'central_super_admin');
+insert into public.master_franchises (id, name, status) values
+  ('33333333-3333-3333-3333-333333333331', 'Test Master A', 'active'),
+  ('33333333-3333-3333-3333-333333333332', 'Test Master B', 'active');
+
+insert into public.master_franchise_territories (id, master_franchise_id, territory) values
+  ('44444444-4444-4444-4444-444444444441', '33333333-3333-3333-3333-333333333331', 'TEST-TERRITORY-A'),
+  ('44444444-4444-4444-4444-444444444442', '33333333-3333-3333-3333-333333333332', 'TEST-TERRITORY-B');
+
+insert into public.franchises (id, master_franchise_id, territory_id, name, status) values
+  ('55555555-5555-5555-5555-555555555551', '33333333-3333-3333-3333-333333333331', '44444444-4444-4444-4444-444444444441', 'Test Franchise A', 'active'),
+  ('55555555-5555-5555-5555-555555555552', '33333333-3333-3333-3333-333333333332', '44444444-4444-4444-4444-444444444442', 'Test Franchise B', 'active');
+
+update public.schools
+set franchise_id = case code
+  when 'TEST-A' then '55555555-5555-5555-5555-555555555551'::uuid
+  when 'TEST-B' then '55555555-5555-5555-5555-555555555552'::uuid
+end
+where code in ('TEST-A', 'TEST-B');
+
+insert into public.memberships (user_id, school_id, role, master_franchise_id) values
+  ('aaaaaaaa-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'school_principal', null),
+  ('bbbbbbbb-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'school_principal', null),
+  ('eeeeeeee-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'franchise_owner', null),
+  ('cccccccc-0000-0000-0000-000000000001', null, 'central_super_admin', null),
+  ('ffffffff-0000-0000-0000-000000000001', null, 'franchise_owner', '33333333-3333-3333-3333-333333333331');
 
 create temp table test_results (test text, outcome text);
 
@@ -113,6 +133,41 @@ select 'T9 franchise dashboard only includes assigned schools',
       where school_id = '22222222-2222-2222-2222-222222222222'
     )
   then 'PASS' else 'FAIL' end;
+
+-- ---- Master franchise A owner sees only its explicitly assigned network ----
+select set_config('request.jwt.claims',
+  '{"sub":"ffffffff-0000-0000-0000-000000000001","role":"authenticated"}', true);
+
+insert into test_results
+select 'T10 master franchise owner sees assigned schools only',
+  case when
+    (select count(*) from public.schools) = 1
+    and exists (select 1 from public.schools where code = 'TEST-A')
+    and not exists (select 1 from public.schools where code = 'TEST-B')
+  then 'PASS' else 'FAIL' end;
+
+insert into test_results
+select 'T11 master franchise owner sees assigned franchise only',
+  case when
+    (select count(*) from public.franchises) = 1
+    and exists (select 1 from public.franchises where name = 'Test Franchise A')
+    and not exists (select 1 from public.franchises where name = 'Test Franchise B')
+  then 'PASS' else 'FAIL' end;
+
+insert into test_results
+select 'T12 master franchise owner sees assigned territory only',
+  case when
+    (select count(*) from public.master_franchise_territories) = 1
+    and exists (select 1 from public.master_franchise_territories where territory = 'TEST-TERRITORY-A')
+    and not exists (select 1 from public.master_franchise_territories where territory = 'TEST-TERRITORY-B')
+  then 'PASS' else 'FAIL' end;
+
+insert into test_results
+select 'T13 master franchise owner cannot read unrelated school memberships',
+  case when not exists (
+    select 1 from public.memberships
+    where school_id = '22222222-2222-2222-2222-222222222222'
+  ) then 'PASS' else 'FAIL' end;
 
 select test || ': ' || outcome as result from test_results order by test;
 

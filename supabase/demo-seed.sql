@@ -11,11 +11,11 @@ create temporary table _demo_user_map (
 
 -- Create dedicated accounts in Supabase Auth first, then paste their user IDs here.
 insert into _demo_user_map(role_key, user_id) values
-  ('central_admin', '55fdaa42-b167-4238-b329-7fe0b0c4e9d1'),
-  ('franchise_owner', 'a81b70f2-fefe-44c2-a106-e8a1282cc93f'),
-  ('principal', '7de48ba5-2a15-460b-9f75-35a1cb0cc8b3'),
-  ('teacher', '90506d70-8856-4fed-8c68-bb9c324d0d4b'),
-  ('student', 'ec0dbacf-aa60-4206-981c-9c47bda519d0');
+  ('central_admin', 'def95993-f6fa-44c0-9147-7856193fb652'),
+  ('franchise_owner', '4e402d24-83dd-4baf-a84f-28a218b5c769'),
+  ('principal', '6b64732d-d174-400b-b2f0-c4dfb8fbb574'),
+  ('teacher', '38b2e6f2-bf72-416d-a921-0c0613ddc634'),
+  ('student', 'ae54f77f-258d-49ec-a972-16cdc04a1921');
 
 do $$
 begin
