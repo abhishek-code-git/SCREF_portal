@@ -1,0 +1,17 @@
+# Roadmap
+- [x] Welcome, login, dashboard, finance, attendance, communication, reports
+- [x] Remove Centre Network tab/page
+- [x] Build Students, Parents, Staff, Admissions pages
+- [x] Build Academic Portal and Transport pages
+- [x] Build Support and Settings pages
+- [x] Add Principal section (principal-related work)
+- [x] Connect database (Supabase) and save real data
+- [x] Phase 0 — read-only audit (approved)
+- [x] Phase 1 — schools + memberships model, RLS isolation, cross-school tests, school context in app
+- [ ] Phase 2 — central vs school layouts, permission-aware menus (approved; in progress)
+- [ ] Finish login and registration with personal/centre details, confirmation and recovery flows
+- [ ] Phase 3 — school-scoped module CRUD (students, admissions, staff, attendance, fees, …)
+- [ ] Phase 4 — franchise administration (school onboarding, entitlements, network reports)
+- [ ] Phase 5 — SchoolExel + live transport integrations (needs API credentials)
+- [ ] Phase 6 — background jobs
+- [ ] Phase 7 — full test pass
