@@ -377,7 +377,7 @@ export type Database = {
           academic_year?: string
           address?: string
           city?: string
-          code: string
+          code?: string
           created_at?: string
           created_by?: string | null
           franchise_id?: string | null
@@ -549,7 +549,9 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_find_user_by_email: { Args: { _email: string }; Returns: string | null }
       can_access_franchise: { Args: { _franchise_id: string }; Returns: boolean }
+      has_super_admin_role: { Args: Record<PropertyKey, never>; Returns: boolean }
       can_access_master_franchise: { Args: { _master_franchise_id: string }; Returns: boolean }
       can_access_school_network: { Args: { _school_id: string }; Returns: boolean }
       can_view_school_members: {

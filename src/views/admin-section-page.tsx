@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminToolsPage } from "@/views/admin-tools-page";
+import { AdminNetworkPage } from "@/views/admin-network-page";
+import { AdminSchoolsPage } from "@/views/admin-schools-page";
 
 type Master = { id: string; name: string; status: string; created_at: string };
 type Territory = { id: string; master_franchise_id: string; territory: string };
@@ -23,9 +25,11 @@ const statusClass = (status: string) => status === "active" ? "text-emerald-700"
 
 export function AdminSectionPage({ section }: { section: string }) {
   const params = useParams<{ id?: string }>();
-  if (section === "master-franchises" || section === "franchises") return <NetworkDirectory kind={section} />;
-  if (section === "master-franchise-detail" && params.id) return <NetworkDetail kind="master" id={params.id} />;
-  if (section === "franchise-detail" && params.id) return <NetworkDetail kind="franchise" id={params.id} />;
+  if (section === "master-franchises") return <AdminNetworkPage kind="master" />;
+  if (section === "franchises") return <AdminNetworkPage kind="franchise" />;
+  if (section === "master-franchise-detail" && params.id) return <AdminNetworkPage kind="master" id={params.id} />;
+  if (section === "franchise-detail" && params.id) return <AdminNetworkPage kind="franchise" id={params.id} />;
+  if (section === "schools") return <AdminSchoolsPage />;
   if (["users", "reports", "onboarding", "audit", "settings"].includes(section)) return <AdminToolsPage section={section} />;
   return <AppShell title={section === "master-franchise-detail" ? "Master Franchise" : "Franchise"} subtitle="Central administration"><p className="surface-panel p-5 text-sm text-muted-foreground">Select a network record from its directory.</p></AppShell>;
 }

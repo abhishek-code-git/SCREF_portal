@@ -12,12 +12,15 @@ export function ResetPage() {
   const [pw, setPw] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [recoveryReady, setRecoveryReady] = useState(false);
+  const [inviteLink, setInviteLink] = useState(false);
   const [checkingRecovery, setCheckingRecovery] = useState(true);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const recoveryLink = new URLSearchParams(window.location.hash.slice(1)).get("type") === "recovery";
+    const type = new URLSearchParams(window.location.hash.slice(1)).get("type");
+    const recoveryLink = type === "recovery" || type === "invite";
+    setInviteLink(type === "invite");
     if (!recoveryLink) {
       setCheckingRecovery(false);
       return;
@@ -54,13 +57,13 @@ export function ResetPage() {
           }
         }}
       >
-        <h1 className="font-display text-xl font-semibold">Set a new password</h1>
+        <h1 className="font-display text-xl font-semibold">{inviteLink ? "Set your password" : "Set a new password"}</h1>
         {checkingRecovery && <p className="text-sm text-muted-foreground">Checking your recovery link…</p>}
-        {!checkingRecovery && !recoveryReady && <p className="text-sm text-muted-foreground">This recovery link is missing, expired, or invalid. Request a new password reset email and open its link in this browser.</p>}
+        {!checkingRecovery && !recoveryReady && <p className="text-sm text-muted-foreground">This password link is missing, expired, or invalid. Request a new password reset email or invitation and open its link in this browser.</p>}
         {recoveryError && <p className="break-words text-xs text-destructive">{recoveryError}</p>}
         <Input type="password" minLength={8} autoComplete="new-password" required value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password" disabled={!recoveryReady} />
         <Input type="password" minLength={8} autoComplete="new-password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm new password" disabled={!recoveryReady} />
-        <Button type="submit" className="w-full" disabled={!recoveryReady || loading}>{loading ? "Please wait…" : "Update password"}</Button>
+        <Button type="submit" className="w-full" disabled={!recoveryReady || loading}>{loading ? "Please wait…" : inviteLink ? "Set password" : "Update password"}</Button>
       </form>
     </div>
   );

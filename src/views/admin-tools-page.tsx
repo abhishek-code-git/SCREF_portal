@@ -5,8 +5,10 @@ import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSessionUser } from "@/hooks/use-session";
-import type { AppRole } from "@/hooks/use-school";
+import { ROLE_LABELS, useSchoolContext, type AppRole } from "@/hooks/use-school";
 import { supabase } from "@/integrations/supabase/client";
+import { inviteUser } from "@/lib/admin-api";
+import { AdminUsersPage } from "@/views/admin-users-page";
 
 type ScopeKind = "global" | "school" | "master" | "franchise";
 type Profile = { user_id: string; full_name: string | null; phone: string };
@@ -17,14 +19,14 @@ type Franchise = { id: string; master_franchise_id: string; name: string; status
 type AuditEntry = { id: string; actor_user_id: string | null; action: string; entity_table: string; entity_id: string | null; details: Record<string, unknown>; created_at: string };
 
 const ROLES: AppRole[] = ["central_super_admin", "central_ops_admin", "franchise_owner", "school_principal", "admissions_staff", "teacher", "accountant", "transport_manager", "parent", "student"];
-const ROLE_NAMES: Record<AppRole, string> = { central_super_admin: "Central Super Admin", central_ops_admin: "Central Ops Admin", franchise_owner: "Franchise Owner", school_principal: "School Principal", admissions_staff: "Admissions Staff", teacher: "Teacher", accountant: "Accountant", transport_manager: "Transport Manager", parent: "Parent", student: "Student" };
+const ROLE_NAMES = ROLE_LABELS;
 const applyError = (message: string) => /does not exist|schema cache|could not find/i.test(message)
-  ? `${message} Apply migrations through 20261115000002_central_admin_tools.sql in timestamp order, then reload.`
+  ? `${message} Apply migrations through 20261120000001_central_admin_hardening.sql in timestamp order, then reload.`
   : message;
 const scopeDescription = (m: Membership, schools: Map<string, string>, masters: Map<string, string>, franchises: Map<string, string>) => m.school_id ? schools.get(m.school_id) ?? "School scope" : m.master_franchise_id ? masters.get(m.master_franchise_id) ?? "Master franchise scope" : m.franchise_id ? franchises.get(m.franchise_id) ?? "Franchise scope" : "Global";
 
 export function AdminToolsPage({ section }: { section: string }) {
-  if (section === "users") return <UsersAccessPage />;
+  if (section === "users") return <AdminUsersPage />;
   if (section === "reports") return <NetworkReportsPage />;
   if (section === "onboarding") return <OnboardingPage />;
   if (section === "audit") return <AuditLogsPage />;
@@ -32,6 +34,7 @@ export function AdminToolsPage({ section }: { section: string }) {
 }
 
 function UsersAccessPage() {
+  const { memberships: callerMemberships } = useSchoolContext();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [schools, setSchools] = useState<Array<{ id: string; name: string; code: string }>>([]);
@@ -43,6 +46,9 @@ function UsersAccessPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState<AppRole>("franchise_owner");
   const [scopeKind, setScopeKind] = useState<ScopeKind>("master");
@@ -76,27 +82,19 @@ function UsersAccessPage() {
   useEffect(() => { void load(); }, [load]);
 
   const scopeOptions = scopeKind === "school" ? schools.map((x) => ({ id: x.id, label: `${x.name} (${x.code})` })) : scopeKind === "master" ? masters.map((x) => ({ id: x.id, label: x.name })) : scopeKind === "franchise" ? franchises.map((x) => ({ id: x.id, label: x.name })) : [];
+  const isSuperAdmin = callerMemberships.some((membership) => membership.role === "central_super_admin");
+  const availableRoles = isSuperAdmin ? ROLES : ROLES.filter((item) => item !== "central_super_admin" && item !== "central_ops_admin");
   const createMembership = async () => {
-    const targetUser = userId.trim();
-    if (!targetUser) { setError("Enter the Auth user UUID for the existing account."); return; }
+    if (!email.trim() || !fullName.trim()) { setError("Enter the person's email address and full name."); return; }
     const globalRole = role === "central_super_admin" || role === "central_ops_admin";
     if (!globalRole && scopeKind === "global") { setError("Choose the organization or school scope for this role."); return; }
     if (!globalRole && !scopeId) { setError("Select a scope for this membership."); return; }
     setBusy(true); setError(null);
     try {
-      const { data: profile, error: profileError } = await supabase.from("profiles").select("user_id").eq("user_id", targetUser).maybeSingle();
-      if (profileError) throw profileError;
-      if (!profile) throw new Error("No application profile exists for that user. Have them create and confirm an account through the existing login page first.");
-      const membership = {
-        user_id: targetUser,
-        role,
-        school_id: globalRole ? null : scopeKind === "school" ? scopeId : null,
-        master_franchise_id: globalRole ? null : scopeKind === "master" ? scopeId : null,
-        franchise_id: globalRole ? null : scopeKind === "franchise" ? scopeId : null,
-      };
-      const { error: insertError } = await supabase.from("memberships").insert(membership);
-      if (insertError) throw insertError;
-      setUserId(""); await load();
+      const result = await inviteUser({ email: email.trim(), full_name: fullName.trim(), phone: phone.trim() || undefined, role, scope_kind: scopeKind, scope_id: globalRole ? undefined : scopeId });
+      setEmail(""); setFullName(""); setPhone("");
+      setError(result.invited ? "Invitation sent. The user will set their password from the email link." : "Access was assigned to the existing account.");
+      await load();
     } catch (cause) { setError(applyError(cause instanceof Error ? cause.message : "Unable to assign this account.")); }
     finally { setBusy(false); }
   };
