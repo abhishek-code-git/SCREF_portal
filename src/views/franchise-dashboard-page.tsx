@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { AlertCircle, ArrowUpRight, Building2, ClipboardCheck, GraduationCap, Users } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
@@ -27,9 +28,15 @@ const statusLabel = (value: string) => {
   if (["suspended", "inactive", "disabled", "archived"].includes(status)) return "Inactive";
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
+const dashboardErrorText = (message: string) => /does not exist|schema cache|could not find/i.test(message)
+  ? `${message} Apply the network foundation and read-model migrations in timestamp order, then reload.`
+  : message;
 
 export function FranchiseDashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const masterFranchiseId = searchParams.get("masterFranchiseId");
+  const franchiseId = searchParams.get("franchiseId");
   const { memberships, setActiveMembership } = useSchoolContext();
   const [schools, setSchools] = useState<SchoolMetric[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,10 +49,6 @@ export function FranchiseDashboard() {
     () => memberships.filter((membership) => membership.role === "franchise_owner" && membership.school_id),
     [memberships],
   );
-  const schoolIds = useMemo(
-    () => [...new Set(assignedMemberships.map((membership) => membership.school_id!))],
-    [assignedMemberships],
-  );
   const membershipBySchool = useMemo(
     () => new Map(assignedMemberships.map((membership) => [membership.school_id!, membership.id])),
     [assignedMemberships],
@@ -57,10 +60,13 @@ export function FranchiseDashboard() {
     setError(null);
     void (async () => {
       try {
-        const { data, error: queryError } = await supabase.rpc("franchise_network_dashboard");
+        const { data, error: queryError } = await supabase.rpc("franchise_network_dashboard", {
+          _master_franchise_id: masterFranchiseId,
+          _franchise_id: franchiseId,
+        });
         if (cancelled) return;
         if (queryError) {
-          setError(queryError.message);
+          setError(dashboardErrorText(queryError.message));
           setSchools([]);
         } else {
           setSchools((data ?? []) as SchoolMetric[]);
@@ -73,7 +79,7 @@ export function FranchiseDashboard() {
       }
     })();
     return () => { cancelled = true; };
-  }, [reloadToken]);
+  }, [reloadToken, masterFranchiseId, franchiseId]);
 
   const totalStudents = useMemo(
     () => schools.reduce((total, school) => total + school.student_count, 0),
@@ -81,6 +87,7 @@ export function FranchiseDashboard() {
   );
   const totalTeachers = schools[0]?.network_teacher_count ?? 0;
   const totalPrincipals = schools[0]?.network_principal_count ?? 0;
+  const scopedView = !!masterFranchiseId || !!franchiseId;
   const active = schools.filter((school) => school.school_status.toLowerCase() === "active").length;
   const pending = schools.filter((school) => ["onboarding", "pending"].includes(school.school_status.toLowerCase())).length;
   const inactive = schools.filter((school) => ["suspended", "inactive", "disabled", "archived"].includes(school.school_status.toLowerCase())).length;
@@ -121,10 +128,10 @@ export function FranchiseDashboard() {
   };
 
   return (
-    <AppShell title="Franchise Dashboard" subtitle="Your database-assigned school network">
+    <AppShell title="Franchise Dashboard" subtitle={scopedView ? "Authorized network scope" : "Your database-assigned school network"}>
       <div className="space-y-6">
         {error && <div role="alert" className="surface-panel flex flex-wrap items-center gap-3 border-destructive/30 p-4 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /><div className="min-w-0 flex-1"><p className="font-medium">Network data could not be loaded</p><p className="mt-1 break-words text-muted-foreground">{error}</p></div><Button variant="outline" size="sm" onClick={() => setReloadToken((token) => token + 1)}>Retry</Button></div>}
-        {!loading && !error && schoolIds.length === 0 && <section className="surface-panel space-y-3 p-6"><h2 className="font-display text-lg font-semibold">No schools are assigned to this account</h2><p className="text-sm text-muted-foreground">Ask a Main Admin to assign the schools you are authorized to manage. This dashboard does not include unassigned schools.</p></section>}
+        {!loading && !error && schools.length === 0 && <section className="surface-panel space-y-3 p-6"><h2 className="font-display text-lg font-semibold">No schools are linked to this network yet</h2><p className="text-sm text-muted-foreground">A Central Admin can link existing schools to franchises. This dashboard only shows schools in the authorized network scope.</p></section>}
 
         <section aria-label="Assigned network metrics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {[

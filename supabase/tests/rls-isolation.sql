@@ -38,6 +38,9 @@ insert into public.memberships (user_id, school_id, role, master_franchise_id) v
   ('cccccccc-0000-0000-0000-000000000001', null, 'central_super_admin', null),
   ('ffffffff-0000-0000-0000-000000000001', null, 'franchise_owner', '33333333-3333-3333-3333-333333333331');
 
+insert into public.memberships (user_id, franchise_id, role)
+values ('ffffffff-0000-0000-0000-000000000002', '55555555-5555-5555-5555-555555555551', 'franchise_owner');
+
 create temp table test_results (test text, outcome text);
 
 -- Run everything below as a real authenticated role (RLS applies)
@@ -167,6 +170,65 @@ select 'T13 master franchise owner cannot read unrelated school memberships',
   case when not exists (
     select 1 from public.memberships
     where school_id = '22222222-2222-2222-2222-222222222222'
+  ) then 'PASS' else 'FAIL' end;
+
+-- ---- Suspending a network revokes owner access while preserving central access ----
+select set_config('request.jwt.claims',
+  '{"sub":"cccccccc-0000-0000-0000-000000000001","role":"authenticated"}', true);
+update public.master_franchises set status = 'suspended'
+where id = '33333333-3333-3333-3333-333333333331';
+
+select set_config('request.jwt.claims',
+  '{"sub":"ffffffff-0000-0000-0000-000000000002","role":"authenticated"}', true);
+
+insert into test_results
+select 'T14 suspended parent blocks direct franchise owner access',
+  case when
+    (select count(*) from public.franchises where id = '55555555-5555-5555-5555-555555555551') = 0
+    and (select count(*) from public.schools where code = 'TEST-A') = 0
+  then 'PASS' else 'FAIL' end;
+
+select set_config('request.jwt.claims',
+  '{"sub":"cccccccc-0000-0000-0000-000000000001","role":"authenticated"}', true);
+
+insert into test_results
+select 'T15 central admin retains suspended network visibility',
+  case when
+    (select count(*) from public.master_franchises where id = '33333333-3333-3333-3333-333333333331') = 1
+  then 'PASS' else 'FAIL' end;
+
+select set_config('request.jwt.claims',
+  '{"sub":"dddddddd-0000-0000-0000-000000000001","role":"authenticated"}', true);
+
+insert into test_results
+select 'T16 account without membership cannot read central audit or settings',
+  case when
+    (select count(*) from public.central_admin_audit_logs) = 0
+    and (select count(*) from public.network_settings) = 0
+  then 'PASS' else 'FAIL' end;
+
+do $$
+begin
+  begin
+    insert into public.network_settings(setting_key, setting_value)
+    values ('network_name', 'Unauthorized test write');
+    insert into test_results values ('T17 non-admin cannot change network settings', 'FAIL');
+  exception when insufficient_privilege THEN
+    insert into test_results values ('T17 non-admin cannot change network settings', 'PASS');
+  end;
+end $$;
+
+select set_config('request.jwt.claims',
+  '{"sub":"cccccccc-0000-0000-0000-000000000001","role":"authenticated"}', true);
+insert into public.network_settings(setting_key, setting_value, updated_by)
+values ('network_name', 'RLS audit test', 'cccccccc-0000-0000-0000-000000000001');
+
+insert into test_results
+select 'T18 Central Admin settings changes create audit events',
+  case when exists (
+    select 1 from public.central_admin_audit_logs
+    where entity_table = 'network_settings' and action = 'insert'
+      and actor_user_id = 'cccccccc-0000-0000-0000-000000000001'
   ) then 'PASS' else 'FAIL' end;
 
 select test || ': ' || outcome as result from test_results order by test;

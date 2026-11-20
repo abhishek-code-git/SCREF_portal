@@ -112,6 +112,57 @@ export type Database = {
         }
         Relationships: []
       }
+      central_admin_audit_logs: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          created_at: string
+          details: Json
+          entity_id: string | null
+          entity_table: string
+          id: string
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          created_at?: string
+          details?: Json
+          entity_id?: string | null
+          entity_table: string
+          id?: string
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          created_at?: string
+          details?: Json
+          entity_id?: string | null
+          entity_table?: string
+          id?: string
+        }
+        Relationships: []
+      }
+      network_settings: {
+        Row: {
+          setting_key: string
+          setting_value: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          setting_key: string
+          setting_value: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          setting_key?: string
+          setting_value?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           user_id: string
@@ -511,6 +562,8 @@ export type Database = {
           active_school_count: number
           class_count: number
           franchise_owner_count: number
+          franchise_count: number
+          master_franchise_count: number
           pending_school_count: number
           principal_count: number
           school_count: number
@@ -519,7 +572,7 @@ export type Database = {
         }[]
       }
       franchise_network_dashboard: {
-        Args: Record<PropertyKey, never>
+        Args: { _franchise_id?: string | null; _master_franchise_id?: string | null }
         Returns: {
           academic_year: string
           address: string

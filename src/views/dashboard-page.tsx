@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
 import { useWorkspace } from "@/hooks/use-workspace";
@@ -8,7 +9,7 @@ import { isCentralRole, useSchoolContext } from "@/hooks/use-school";
 import { supabase } from "@/integrations/supabase/client";
 
 type Counts = { students: number; classes: number };
-type NetworkCounts = { schools: number; activeSchools: number; pendingSchools: number; students: number; classes: number; principals: number; teachers: number; franchiseOwners: number };
+type NetworkCounts = { schools: number; activeSchools: number; pendingSchools: number; students: number; classes: number; principals: number; teachers: number; franchiseOwners: number; masterFranchises: number; franchises: number };
 
 export function Dashboard() {
   const { profile } = useWorkspace();
@@ -33,6 +34,8 @@ export function Dashboard() {
         principals: summary.principal_count,
         teachers: summary.teacher_count,
         franchiseOwners: summary.franchise_owner_count,
+        masterFranchises: summary.master_franchise_count,
+        franchises: summary.franchise_count,
       };
     },
   });
@@ -73,7 +76,9 @@ export function Dashboard() {
               ["Classes", networkCounts?.classes],
               ["Principals", networkCounts?.principals],
               ["Teachers", networkCounts?.teachers],
-              ["Franchise owner memberships", networkCounts?.franchiseOwners],
+              ["Franchise owners", networkCounts?.franchiseOwners],
+              ["Master franchises", networkCounts?.masterFranchises],
+              ["Franchises", networkCounts?.franchises],
             ].map(([label, value]) => (
               <article key={label} className="surface-panel p-5">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
@@ -82,7 +87,7 @@ export function Dashboard() {
             ))}
           </section>
           {!networkQuery.error && !networkQuery.isPending && networkCounts?.schools === 0 && <section className="surface-panel p-5 text-sm text-muted-foreground">No school records are visible to this central account yet. Confirm the base migrations are applied and that school records exist in this Supabase project.</section>}
-          <section className="surface-panel p-5"><h2 className="font-display font-semibold">Network scope</h2><p className="mt-2 text-sm text-muted-foreground">Counts above come from authorized database rows. Franchise territories, approvals, activity logs, and network ownership links are not represented in the current schema.</p></section>
+          <section className="surface-panel space-y-4 p-5"><div><h2 className="font-display font-semibold">Network management</h2><p className="mt-1 text-sm text-muted-foreground">Manage database-backed master franchise and franchise records, owners, territories, school links, and access status.</p></div><div className="flex flex-wrap gap-3"><Link href="/admin/master-franchises" className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Manage master franchises</Link><Link href="/admin/franchises" className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium">Manage franchises</Link><Link href="/admin/schools" className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium">Manage schools</Link></div></section>
         </div>
       </AppShell>
     );
