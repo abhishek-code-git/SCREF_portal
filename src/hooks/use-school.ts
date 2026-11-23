@@ -29,8 +29,27 @@ export type School = {
 export type Membership = {
   id: string;
   school_id: string | null;
+  master_franchise_id: string | null;
+  franchise_id: string | null;
   role: AppRole;
 };
+
+export type MasterFranchise = { id: string; name: string; status: string };
+
+export function franchiseOwnerScope(membership: Membership): "master" | "franchise" | "school" | null {
+  if (membership.role !== "franchise_owner") return null;
+  if (membership.master_franchise_id) return "master";
+  if (membership.franchise_id) return "franchise";
+  if (membership.school_id) return "school";
+  return null;
+}
+
+export function membershipRoleLabel(membership: Membership | undefined): string | undefined {
+  if (!membership) return undefined;
+  return membership.role === "franchise_owner" && franchiseOwnerScope(membership) === "master"
+    ? "Master Franchise Owner"
+    : ROLE_LABELS[membership.role];
+}
 
 export const ROLE_LABELS: Record<AppRole, string> = {
   central_super_admin: "Central Super Admin",
@@ -66,8 +85,11 @@ export const ROLE_PAGES: Record<AppRole, string[]> = {
   student: ["/student", "/support", "/settings"],
 };
 
-export function canOpen(role: AppRole | undefined, path: string): boolean {
+export function canOpen(role: AppRole | undefined, path: string, membership?: Membership): boolean {
   if (!role) return false;
+  if (path === "/master" || path.startsWith("/master/")) {
+    return isCentralRole(role) || (role === "franchise_owner" && franchiseOwnerScope(membership ?? { id: "", school_id: null, master_franchise_id: null, franchise_id: null, role }) === "master");
+  }
   // Network administration is reserved for central roles, even though some
   // leadership roles have broad access to the existing school modules.
   if (path === "/admin" || path.startsWith("/admin/")) return isCentralRole(role);
@@ -78,10 +100,10 @@ export function canOpen(role: AppRole | undefined, path: string): boolean {
   return pages.includes(ALL) || pages.includes(path);
 }
 
-export function homeFor(role: AppRole | undefined): "/teacher" | "/student" | "/dashboard" | "/franchise/dashboard" {
+export function homeFor(role: AppRole | undefined, membership?: Membership): "/teacher" | "/student" | "/dashboard" | "/franchise/dashboard" | "/master/dashboard" {
   if (role === "teacher") return "/teacher";
   if (role === "student") return "/student";
-  if (role === "franchise_owner") return "/franchise/dashboard";
+  if (role === "franchise_owner") return franchiseOwnerScope(membership ?? { id: "", school_id: null, master_franchise_id: null, franchise_id: null, role }) === "master" ? "/master/dashboard" : "/franchise/dashboard";
   return "/dashboard";
 }
 
@@ -95,12 +117,14 @@ export const LEADERSHIP: AppRole[] = ["central_super_admin", "central_ops_admin"
 export function useSchoolContext() {
   const { user, ready } = useSessionUser();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
+  const [activeMasterFranchiseId, setActiveMasterFranchiseId] = useState<string | null>(null);
+  const [selectionReady, setSelectionReady] = useState(false);
   const contextQuery = useQuery<{ memberships: Membership[]; schools: School[] }, Error>({
     queryKey: ["school-context", user?.id],
     enabled: ready && !!user,
     queryFn: async () => {
       if (!user) return { memberships: [], schools: [] };
-      const membershipResult = await supabase.from("memberships").select("id,school_id,role").eq("user_id", user.id);
+      const membershipResult = await supabase.from("memberships").select("id,school_id,master_franchise_id,franchise_id,role").eq("user_id", user.id);
       if (membershipResult.error) throw membershipResult.error;
       const memberships = (membershipResult.data ?? []) as Membership[];
       const ids = [...new Set(memberships.map((membership) => membership.school_id).filter((id): id is string => !!id))];
@@ -111,19 +135,41 @@ export function useSchoolContext() {
     },
   });
   const memberships = useMemo(() => contextQuery.data?.memberships ?? [], [contextQuery.data?.memberships]);
+  const masterMemberships = useMemo(() => memberships.filter((membership) => franchiseOwnerScope(membership) === "master"), [memberships]);
+  const masterIds = useMemo(() => [...new Set(masterMemberships.map((membership) => membership.master_franchise_id).filter((id): id is string => !!id))], [masterMemberships]);
+  const masterQuery = useQuery<MasterFranchise[], Error>({
+    queryKey: ["master-franchises-for-user", user?.id, masterIds],
+    enabled: ready && !!user && masterIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("master_franchises").select("id,name,status").in("id", masterIds);
+      if (error) throw error;
+      return (data ?? []) as MasterFranchise[];
+    },
+  });
   const schools = contextQuery.data?.schools ?? [];
-  const error = contextQuery.error?.message ?? null;
-  const loaded = !user || !contextQuery.isPending;
+  const error = contextQuery.error?.message ?? masterQuery.error?.message ?? null;
+  const loaded = !user || (!contextQuery.isPending && (masterIds.length === 0 || !masterQuery.isPending));
 
   useEffect(() => {
-    if (!user || !contextQuery.data) {
-      if (!user) setSelectedMembershipId(null);
+    if (!user) {
+      setSelectedMembershipId(null);
+      setActiveMasterFranchiseId(null);
+      setSelectionReady(true);
+      return;
+    }
+    if (!contextQuery.data) {
+      setSelectionReady(false);
       return;
     }
     let storedMembershipId: string | null = null;
     try { storedMembershipId = window.localStorage.getItem(`active-membership:${user.id}`); } catch { /* storage may be unavailable */ }
     setSelectedMembershipId(memberships.length === 1 ? memberships[0]!.id : memberships.some((m) => m.id === storedMembershipId) ? storedMembershipId : null);
-  }, [user, contextQuery.data, memberships]);
+    let saved: string | null = null;
+    try { saved = window.localStorage.getItem(`active-master-franchise:${user.id}`); } catch { /* storage may be unavailable */ }
+    const next = masterIds.includes(saved ?? "") ? saved : masterIds[0] ?? null;
+    setActiveMasterFranchiseId(next);
+    setSelectionReady(true);
+  }, [user, contextQuery.data, memberships, masterIds]);
 
   const activeMembership = memberships.length === 1
     ? memberships[0]
@@ -137,12 +183,25 @@ export function useSchoolContext() {
       try { window.localStorage.setItem(`active-membership:${user.id}`, membershipId); } catch { /* selection remains active for this page */ }
     }
   };
+  const selectMasterFranchise = (masterId: string) => {
+    if (!masterIds.includes(masterId)) return;
+    setActiveMasterFranchiseId(masterId);
+    if (user) {
+      try { window.localStorage.setItem(`active-master-franchise:${user.id}`, masterId); } catch { /* selection remains active for this page */ }
+    }
+  };
+  const activeMasterFranchise = masterQuery.data?.find((master) => master.id === activeMasterFranchiseId) ?? null;
 
   return {
     user,
-    ready: ready && loaded,
+    ready: ready && loaded && selectionReady,
     error,
     memberships,
+    masterMemberships,
+    masterFranchises: masterQuery.data ?? [],
+    activeMasterFranchise,
+    activeMasterFranchiseId,
+    setActiveMasterFranchise: selectMasterFranchise,
     schools,
     activeSchool,
     activeMembership,

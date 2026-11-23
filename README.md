@@ -11,7 +11,7 @@ Next.js 15 App Router application using Supabase Auth and Postgres. The Central 
    - `NEXT_PUBLIC_SITE_URL` (for local development, `http://localhost:3000`)
    - `SUPABASE_SERVICE_ROLE_KEY` (server only; never use `NEXT_PUBLIC_`)
    - `CRON_SECRET` only when scheduled routes are enabled.
-3. Apply every SQL file in `supabase/migrations/` in filename order. In the SQL editor, paste one file at a time and wait for it to succeed. The final Central Admin hardening file is `20261120000001_central_admin_hardening.sql`.
+3. Apply every SQL file in `supabase/migrations/` in filename order. In the SQL editor, paste one file at a time and wait for it to succeed. The current master franchise access migrations are `20261121000001_master_franchise_access.sql` and `20261121000002_master_franchise_inactive_read_only.sql`.
 4. In Supabase **Authentication → URL Configuration**, set the Site URL to `NEXT_PUBLIC_SITE_URL` and add these redirect URLs:
    - `http://localhost:3000/reset-password`
    - your deployed `/reset-password` URL.
@@ -26,6 +26,12 @@ Next.js 15 App Router application using Supabase Auth and Postgres. The Central 
 4. **Users & Access:** invite principals, teachers, and other roles by email. The server verifies the caller and scope, then sends a Supabase invitation when needed.
 
 The primary routes are `/admin`, `/admin/master-franchises`, `/admin/franchises`, `/admin/schools`, `/admin/users`, `/admin/reports`, `/admin/onboarding`, `/admin/audit`, and `/admin/settings`.
+
+## Master franchisee workspace
+
+A master franchise owner is assigned by Central Admin through **Master Franchises → assign owner by email**. Their database membership is scoped to that master franchise; it does not create a new role. An owner can see aggregate network counts, request franchises, invite franchise owners for active franchises, request schools under active franchises, invite principals to active schools, and remove owner or principal access within the active network.
+
+Master owners cannot approve their own requests, change franchise or school statuses, manage central roles, assign themselves to another master franchise, or view raw student and attendance rows. Student, teacher, principal, and attendance totals come from database aggregate functions. New franchise requests appear in **Central Admin → Onboarding & Approvals** for approval. School requests appear there as onboarding schools and require Central Admin activation. Central Admin can use **View as master** on a master franchise detail page for a read-only preview.
 
 ## Verification
 

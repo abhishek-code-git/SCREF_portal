@@ -70,7 +70,7 @@ export function LoginPage() {
 
       const { data: memberships, error: membershipError } = await supabase
         .from("memberships")
-        .select("role")
+        .select("role,school_id,master_franchise_id,franchise_id")
         .eq("user_id", data.user.id);
       if (membershipError) throw membershipError;
 
@@ -78,6 +78,7 @@ export function LoginPage() {
       const safePath = requestedPath?.startsWith("/") && !requestedPath.startsWith("//") ? requestedPath : null;
       if (safePath) router.replace(safePath);
       else if (memberships?.some((membership) => membership.role === "central_super_admin" || membership.role === "central_ops_admin")) router.replace("/dashboard");
+      else if (memberships?.some((membership) => membership.role === "franchise_owner" && membership.master_franchise_id)) router.replace("/master/dashboard");
       else if (memberships?.some((membership) => membership.role === "franchise_owner")) router.replace("/franchise/dashboard");
       else if (memberships?.some((membership) => membership.role === "teacher")) router.replace("/teacher");
       else if (memberships?.some((membership) => membership.role === "student")) router.replace("/student");

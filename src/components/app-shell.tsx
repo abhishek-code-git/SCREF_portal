@@ -37,7 +37,7 @@ import {
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { DEMO_MODE } from "@/lib/demo-mode";
-import { ROLE_LABELS, canOpen, homeFor, isCentralRole, useSchoolContext } from "@/hooks/use-school";
+import { ROLE_LABELS, canOpen, homeFor, isCentralRole, membershipRoleLabel, useSchoolContext } from "@/hooks/use-school";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -115,6 +115,15 @@ const franchiseNav: NavGroup[] = [
   ...nav,
 ];
 
+const masterNav: NavGroup[] = [
+  { group: "Master Franchise", items: [
+    { label: "Overview", to: "/master/dashboard", icon: LayoutDashboard },
+    { label: "Franchises", to: "/master/franchises", icon: Network },
+    { label: "Schools", to: "/master/schools", icon: GraduationCap },
+    { label: "Team", to: "/master/team", icon: Users },
+  ] },
+];
+
 const studentNav: NavGroup[] = [
   { group: "Student portal", items: [{ label: "My school", to: "/student", icon: GraduationCap }, ...nav.flatMap((group) => group.items.filter((item) => item.to === "/support" || item.to === "/settings"))] },
 ];
@@ -133,12 +142,18 @@ const sampleDataRoutes = new Set([
 
 function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (() => void) | undefined }) {
   const pathname = usePathname();
-  const { activeRole, memberships } = useSchoolContext();
-  const routeRole = pathname.startsWith("/franchise/") && memberships.some((membership) => membership.role === "franchise_owner")
-    ? "franchise_owner"
-    : activeRole;
+  const { activeRole, memberships, masterMemberships, activeMasterFranchiseId } = useSchoolContext();
+  const isMasterRoute = pathname === "/master" || pathname.startsWith("/master/");
+  const masterMembership = masterMemberships.find((membership) => membership.master_franchise_id === activeMasterFranchiseId);
+  const routeRole = isCentralRole(activeRole)
+    ? activeRole
+    : (pathname.startsWith("/franchise/") && memberships.some((membership) => membership.role === "franchise_owner")) || (isMasterRoute && masterMembership)
+      ? "franchise_owner"
+      : activeRole;
   const sourceNav = isCentralRole(routeRole)
     ? centralNav
+    : isMasterRoute && masterMembership
+      ? masterNav
     : routeRole === "franchise_owner"
       ? franchiseNav
       : routeRole === "student"
@@ -150,7 +165,7 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
       items: g.items.filter((i) => {
         if (!i.to) return true;
         if (i.to === "/teacher") return routeRole === "teacher" || canOpen(routeRole, "/principal");
-        return canOpen(routeRole, i.to);
+        return canOpen(routeRole, i.to, masterMembership);
       }),
     }))
     .filter((g) => g.items.length > 0);
@@ -255,12 +270,13 @@ function SidebarInner({
 }
 
 function SidebarCentreCard({ collapsed }: { collapsed: boolean }) {
-  const { activeSchool } = useSchoolContext();
+  const { activeSchool, activeMasterFranchise } = useSchoolContext();
   const pathname = usePathname();
   const isFranchiseWorkspace = pathname.startsWith("/franchise/");
-  const code = isFranchiseWorkspace ? "NETWORK" : activeSchool?.code ?? "CENTRAL";
-  const name = isFranchiseWorkspace ? "Assigned school network" : activeSchool?.name ?? "Central workspace";
-  const city = isFranchiseWorkspace ? "" : activeSchool?.city ?? "";
+  const isMasterWorkspace = pathname.startsWith("/master/");
+  const code = isMasterWorkspace ? "MASTER NETWORK" : isFranchiseWorkspace ? "NETWORK" : activeSchool?.code ?? "CENTRAL";
+  const name = isMasterWorkspace ? activeMasterFranchise?.name ?? "Master franchise" : isFranchiseWorkspace ? "Assigned school network" : activeSchool?.name ?? "Central workspace";
+  const city = isMasterWorkspace || isFranchiseWorkspace ? "" : activeSchool?.city ?? "";
   return (
     <div
       className={cn(
@@ -299,9 +315,12 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const { user, profile, ready: profileReady, error: profileError } = useWorkspace();
-  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, activeMembership, setActiveMembership } = useSchoolContext();
+  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, activeMembership, setActiveMembership, masterMemberships, masterFranchises, activeMasterFranchise, activeMasterFranchiseId, setActiveMasterFranchise } = useSchoolContext();
   const pathname = usePathname();
   const isFranchiseDashboard = pathname === "/franchise/dashboard";
+  const isMasterRoute = pathname === "/master" || pathname.startsWith("/master/");
+  const centralMembership = memberships.find((membership) => isCentralRole(membership.role));
+  const routeMasterMembership = masterMemberships.find((membership) => membership.master_franchise_id === activeMasterFranchiseId);
   useEffect(() => {
     if (profileReady && !user) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
   }, [profileReady, user, pathname, router]);
@@ -327,36 +346,44 @@ export function AppShell({
   if (memberships.length === 0) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">No workspace access</h1><p className="text-sm text-muted-foreground">Your account has no active school membership. Ask your school administrator to invite or assign this account, then sign in again.</p><Button onClick={handleLogout}>Sign out</Button></div></div>;
   }
-  if (memberships.length > 1 && !activeMembership && !isFranchiseDashboard) {
-    return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel w-full max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Choose your workspace</h1><p className="text-sm text-muted-foreground">This account has access to more than one workspace. Select the one you want to open.</p>{memberships.map((membership) => { const school = schools.find((item) => item.id === membership.school_id); return <Button key={membership.id} variant="outline" className="w-full justify-between" onClick={() => setActiveMembership(membership.id)}>{school?.name ?? "Central workspace"}<span className="text-muted-foreground">{ROLE_LABELS[membership.role]}</span></Button>; })}</div></div>;
+  if (memberships.length > 1 && !activeMembership && !isFranchiseDashboard && !(isMasterRoute && (routeMasterMembership || centralMembership))) {
+    return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel w-full max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Choose your workspace</h1><p className="text-sm text-muted-foreground">This account has access to more than one workspace. Select the one you want to open.</p>{memberships.map((membership) => { const school = schools.find((item) => item.id === membership.school_id); return <Button key={membership.id} variant="outline" className="w-full justify-between" onClick={() => setActiveMembership(membership.id)}>{school?.name ?? "Network workspace"}<span className="text-muted-foreground">{membershipRoleLabel(membership) ?? ROLE_LABELS[membership.role]}</span></Button>; })}</div></div>;
   }
   if (!isFranchiseDashboard && activeSchool && ["inactive", "suspended", "disabled", "archived"].includes(activeSchool.status.toLowerCase())) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Workspace is inactive</h1><p className="text-sm text-muted-foreground">This school workspace is currently inactive. Contact your school administrator for access.</p><Button onClick={handleLogout}>Sign out</Button></div></div>;
   }
-  const routeRole = isFranchiseDashboard && memberships.some((membership) => membership.role === "franchise_owner")
+  const routeRole = isMasterRoute && centralMembership
+    ? centralMembership.role
+    : isMasterRoute && routeMasterMembership
+      ? "franchise_owner"
+      : isFranchiseDashboard && memberships.some((membership) => membership.role === "franchise_owner")
     ? "franchise_owner"
     : activeRole;
-  const allowed = canOpen(routeRole, pathname);
+  const routeMembership = isMasterRoute && centralMembership ? centralMembership : isMasterRoute ? routeMasterMembership : activeMembership;
+  const allowed = canOpen(routeRole, pathname, routeMembership);
   if (!allowed) {
-    return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-md space-y-3 p-7 text-center"><ShieldAlert className="mx-auto h-6 w-6 text-destructive" /><h1 className="font-display text-xl font-semibold">This section isn’t part of your role</h1><p className="text-sm text-muted-foreground">Signed in as {activeRole ? ROLE_LABELS[activeRole] : "member"}. Ask your school administrator if you need access.</p><Button onClick={() => router.replace(homeFor(activeRole))}>Go to my home</Button></div></div>;
+    return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-md space-y-3 p-7 text-center"><ShieldAlert className="mx-auto h-6 w-6 text-destructive" /><h1 className="font-display text-xl font-semibold">This section isn’t part of your role</h1><p className="text-sm text-muted-foreground">Signed in as {membershipRoleLabel(activeMembership) ?? (activeRole ? ROLE_LABELS[activeRole] : "member")}. Ask your school administrator if you need access.</p><Button onClick={() => router.replace(homeFor(activeRole, activeMembership))}>Go to my home</Button></div></div>;
   }
   if (sampleDataRoutes.has(pathname) && !DEMO_MODE) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">This module is not connected to live data</h1><p className="text-sm text-muted-foreground">Its current records are prototype fixtures and are hidden for your school account. Ask your administrator when live module data is available.</p><Button onClick={() => router.replace("/dashboard")}>Return to dashboard</Button></div></div>;
   }
   const mobileItems = isCentralRole(routeRole)
     ? centralNav[0]!.items.slice(0, 4).filter((i): i is NavLeaf & { to: string } => !!i.to)
-    : routeRole === "franchise_owner"
+      : isMasterRoute && (routeMasterMembership || centralMembership)
+      ? [{ label: "Overview", to: "/master/dashboard", icon: LayoutDashboard }, { label: "Franchises", to: "/master/franchises", icon: Network }, { label: "Schools", to: "/master/schools", icon: GraduationCap }, { label: "Team", to: "/master/team", icon: Users }]
+      : routeRole === "franchise_owner"
       ? [{ label: "Network", to: "/franchise/dashboard", icon: LayoutDashboard }, ...mobileNav.filter((i) => canOpen(routeRole, i.to))]
       : routeRole === "student"
         ? [{ label: "My school", to: "/student", icon: GraduationCap }, ...mobileNav.filter((i) => canOpen(routeRole, i.to))]
         : mobileNav.filter((i) => canOpen(routeRole, i.to));
   const displayName = profile.full_name;
   const displayEmail = user.email ?? "";
-  const displayRole = activeRole
-    ? ROLE_LABELS[activeRole]
+  const displayRole = (isMasterRoute && routeMasterMembership ? membershipRoleLabel(routeMasterMembership) : membershipRoleLabel(activeMembership))
+    ?? (activeRole
+    ? (membershipRoleLabel(activeMembership) ?? ROLE_LABELS[activeRole])
     : memberships.some((membership) => membership.role === "franchise_owner")
       ? ROLE_LABELS.franchise_owner
-      : "Central account";
+      : "Central account");
   const initials = displayName
     .split(" ")
     .filter(Boolean)
@@ -405,7 +432,10 @@ export function AppShell({
               />
             </div>
 
+            {pathname.startsWith("/admin/master-franchises/") && <Button asChild size="sm" variant="outline"><Link href={`/master/dashboard?masterFranchiseId=${pathname.split("/").filter(Boolean).pop()}`}>View as master</Link></Button>}
             {actions}
+
+            {isMasterRoute && masterMemberships.length > 1 && <select aria-label="Master franchise" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeMasterFranchiseId ?? ""} onChange={(event) => { setActiveMasterFranchise(event.target.value); router.replace(`/master/dashboard?masterFranchiseId=${event.target.value}`); }}><option value="" disabled>Select network</option>{masterFranchises.map((master) => <option key={master.id} value={master.id}>{master.name}</option>)}</select>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -468,10 +498,10 @@ export function AppShell({
               <ShieldAlert className="h-6 w-6 text-destructive" />
               <p className="mt-3 font-display font-semibold">This section isn&apos;t part of your role</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Signed in as {activeRole ? ROLE_LABELS[activeRole] : "member"}. Ask your principal if you need access.
+                Signed in as {membershipRoleLabel(activeMembership) ?? (activeRole ? ROLE_LABELS[activeRole] : "member")}. Ask your principal if you need access.
               </p>
               <Button className="mt-5" asChild>
-                <Link href={homeFor(activeRole)}>Go to my home</Link>
+                <Link href={homeFor(activeRole, activeMembership)}>Go to my home</Link>
               </Button>
             </div>
           )}

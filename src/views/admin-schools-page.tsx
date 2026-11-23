@@ -37,8 +37,7 @@ export function AdminSchoolsPage() {
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
-  const masterFor = (school: School) => franchises.find((franchise) => franchise.id === school.franchise_id)?.master_franchise_id ?? null;
-  const filtered = useMemo(() => schools.filter((school) => (statusFilter === "all" || school.status === statusFilter) && (franchiseFilter === "all" || school.franchise_id === franchiseFilter) && (masterFilter === "all" || masterFor(school) === masterFilter) && (yearFilter === "all" || school.academic_year === yearFilter) && `${school.name} ${school.code} ${school.city}`.toLowerCase().includes(search.toLowerCase())), [schools, statusFilter, franchiseFilter, masterFilter, yearFilter, search, franchises]);
+  const filtered = useMemo(() => schools.filter((school) => (statusFilter === "all" || school.status === statusFilter) && (franchiseFilter === "all" || school.franchise_id === franchiseFilter) && (masterFilter === "all" || franchises.find((franchise) => franchise.id === school.franchise_id)?.master_franchise_id === masterFilter) && (yearFilter === "all" || school.academic_year === yearFilter) && `${school.name} ${school.code} ${school.city}`.toLowerCase().includes(search.toLowerCase())), [schools, statusFilter, franchiseFilter, masterFilter, yearFilter, search, franchises]);
   const pageSize = 20; const rows = filtered.slice(page * pageSize, page * pageSize + pageSize); const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const startEdit = (school?: School) => { setEditing(school ?? null); setForm(school ? { name: school.name, city: school.city, state: school.state, address: school.address, academic_year: school.academic_year, status: school.status, franchise_id: school.franchise_id ?? "" } : { name: "", city: "", state: "", address: "", academic_year: years(), status: "onboarding", franchise_id: "" }); };
   const save = async () => {
