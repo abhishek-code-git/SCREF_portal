@@ -550,6 +550,9 @@ export type Database = {
     }
     Functions: {
       admin_find_user_by_email: { Args: { _email: string }; Returns: string | null }
+      is_franchise_owner: { Args: { _franchise_id: string }; Returns: boolean }
+      is_franchise_owner_of_school: { Args: { _school_id: string }; Returns: boolean }
+      franchise_is_open: { Args: { _franchise_id: string }; Returns: boolean }
       is_master_owner: { Args: { _master_franchise_id: string }; Returns: boolean }
       is_master_owner_of_franchise: { Args: { _franchise_id: string }; Returns: boolean }
       is_master_owner_of_school: { Args: { _school_id: string }; Returns: boolean }
@@ -587,6 +590,29 @@ export type Database = {
           owner_names: string | null
           attendance_today_count: number
           attendance_today_present: number
+        }[]
+      }
+      franchise_overview: {
+        Args: { _franchise_id: string }
+        Returns: {
+          school_count: number
+          active_school_count: number
+          pending_school_count: number
+          student_count: number
+          teacher_count: number
+          principal_count: number
+          attendance_today_count: number
+          attendance_today_present: number
+          schools_without_principal: number
+        }[]
+      }
+      franchise_dashboard_scope: {
+        Args: { _franchise_id: string }
+        Returns: {
+          id: string
+          name: string
+          status: string
+          master_status: string
         }[]
       }
       can_access_franchise: { Args: { _franchise_id: string }; Returns: boolean }

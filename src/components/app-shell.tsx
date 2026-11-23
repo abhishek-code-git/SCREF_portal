@@ -110,7 +110,11 @@ const centralNav: NavGroup[] = [
 const franchiseNav: NavGroup[] = [
   {
     group: "Franchise Network",
-    items: [{ label: "Franchise Dashboard", to: "/franchise/dashboard", icon: LayoutDashboard }],
+    items: [
+      { label: "Franchise Dashboard", to: "/franchise/dashboard", icon: LayoutDashboard },
+      { label: "Schools", to: "/franchise/schools", icon: GraduationCap },
+      { label: "Team", to: "/franchise/team", icon: Users },
+    ],
   },
   ...nav,
 ];
@@ -315,10 +319,11 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const { user, profile, ready: profileReady, error: profileError } = useWorkspace();
-  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, activeMembership, setActiveMembership, masterMemberships, masterFranchises, activeMasterFranchise, activeMasterFranchiseId, setActiveMasterFranchise } = useSchoolContext();
+  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, workspaceSchools, setActiveSchool, activeMembership, setActiveMembership, masterMemberships, masterFranchises, activeMasterFranchise, activeMasterFranchiseId, setActiveMasterFranchise } = useSchoolContext();
   const pathname = usePathname();
   const isFranchiseDashboard = pathname === "/franchise/dashboard";
   const isMasterRoute = pathname === "/master" || pathname.startsWith("/master/");
+  const hasFranchiseScope = memberships.some((membership) => membership.role === "franchise_owner" && !!membership.franchise_id);
   const centralMembership = memberships.find((membership) => isCentralRole(membership.role));
   const routeMasterMembership = masterMemberships.find((membership) => membership.master_franchise_id === activeMasterFranchiseId);
   useEffect(() => {
@@ -346,7 +351,7 @@ export function AppShell({
   if (memberships.length === 0) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">No workspace access</h1><p className="text-sm text-muted-foreground">Your account has no active school membership. Ask your school administrator to invite or assign this account, then sign in again.</p><Button onClick={handleLogout}>Sign out</Button></div></div>;
   }
-  if (memberships.length > 1 && !activeMembership && !isFranchiseDashboard && !(isMasterRoute && (routeMasterMembership || centralMembership))) {
+  if (memberships.length > 1 && !activeMembership && !(hasFranchiseScope && activeSchool) && !isFranchiseDashboard && !(isMasterRoute && (routeMasterMembership || centralMembership))) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel w-full max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Choose your workspace</h1><p className="text-sm text-muted-foreground">This account has access to more than one workspace. Select the one you want to open.</p>{memberships.map((membership) => { const school = schools.find((item) => item.id === membership.school_id); return <Button key={membership.id} variant="outline" className="w-full justify-between" onClick={() => setActiveMembership(membership.id)}>{school?.name ?? "Network workspace"}<span className="text-muted-foreground">{membershipRoleLabel(membership) ?? ROLE_LABELS[membership.role]}</span></Button>; })}</div></div>;
   }
   if (!isFranchiseDashboard && activeSchool && ["inactive", "suspended", "disabled", "archived"].includes(activeSchool.status.toLowerCase())) {
@@ -436,6 +441,7 @@ export function AppShell({
             {actions}
 
             {isMasterRoute && masterMemberships.length > 1 && <select aria-label="Master franchise" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeMasterFranchiseId ?? ""} onChange={(event) => { setActiveMasterFranchise(event.target.value); router.replace(`/master/dashboard?masterFranchiseId=${event.target.value}`); }}><option value="" disabled>Select network</option>{masterFranchises.map((master) => <option key={master.id} value={master.id}>{master.name}</option>)}</select>}
+            {hasFranchiseScope && !isMasterRoute && workspaceSchools.length > 0 && <select aria-label="School workspace" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeSchool?.id ?? ""} onChange={(event) => setActiveSchool(event.target.value)}><option value="">Select school</option>{workspaceSchools.map((school) => <option key={school.id} value={school.id}>{school.name}</option>)}</select>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

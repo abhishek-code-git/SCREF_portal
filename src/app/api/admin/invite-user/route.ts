@@ -30,15 +30,28 @@ export async function POST(request: Request) {
   if (!validScope) return fail("The selected role requires a different organization scope.", 400);
 
   const { data: callerMemberships, error: callerError } = await caller.supabase
-    .from("memberships").select("role,master_franchise_id").eq("user_id", caller.userId);
+    .from("memberships").select("role,master_franchise_id,franchise_id,school_id").eq("user_id", caller.userId);
   if (callerError) return fail("Unable to verify your access.", 403);
   const callerIsCentral = callerMemberships.some((m) => m.role === "central_super_admin" || m.role === "central_ops_admin");
   const callerIsSuper = callerMemberships.some((m) => m.role === "central_super_admin");
   const ownerMasterIds = callerMemberships.filter((m) => m.role === "franchise_owner" && m.master_franchise_id).map((m) => m.master_franchise_id!);
-  if (!callerIsCentral && ownerMasterIds.length === 0) return fail("Only Central Admins and Master Franchise Owners can invite users.", 403);
+  const ownerFranchiseIds = callerMemberships.filter((m) => m.role === "franchise_owner" && m.franchise_id).map((m) => m.franchise_id!);
+  const principalSchoolIds = callerMemberships.filter((m) => m.role === "school_principal" && m.school_id).map((m) => m.school_id!);
+  if (!callerIsCentral && ownerMasterIds.length === 0 && ownerFranchiseIds.length === 0 && principalSchoolIds.length === 0) return fail("Your account is not authorized to invite users.", 403);
   if (callerIsCentral && centralRole && !callerIsSuper) return fail("Only a Central Super Admin can invite Central Admin accounts.", 403);
 
-  if (!callerIsCentral) {
+  const staffRoles = ["teacher", "admissions_staff", "accountant", "transport_manager"] as const;
+  if (!callerIsCentral && ownerFranchiseIds.length > 0) {
+    const allowed = payload.scope_kind === "school" && !!payload.scope_id
+      && ((payload.role === "school_principal" || staffRoles.includes(payload.role as typeof staffRoles[number])));
+    if (!allowed) return fail("Franchise Owners may invite principals and school staff only to their own franchise schools.", 403);
+    const { data: school, error } = await caller.supabase.from("schools").select("id,franchise_id,status").eq("id", payload.scope_id!).maybeSingle();
+    if (error || !school?.franchise_id || !ownerFranchiseIds.includes(school.franchise_id)) return fail("That school is outside your authorized franchise.", 403);
+    const { data: open } = await caller.supabase.rpc("franchise_is_open", { _franchise_id: school.franchise_id });
+    if (school.status !== "active" || !open) return fail("Invitations are available only for schools in an active franchise and master franchise.", 403);
+  } else if (!callerIsCentral && principalSchoolIds.length > 0) {
+    if (payload.scope_kind !== "school" || !payload.scope_id || !staffRoles.includes(payload.role as typeof staffRoles[number]) || !principalSchoolIds.includes(payload.scope_id)) return fail("Principals may invite school staff only to their own school.", 403);
+  } else if (!callerIsCentral) {
     const allowedKind = (payload.role === "franchise_owner" && payload.scope_kind === "franchise")
       || (payload.role === "school_principal" && payload.scope_kind === "school");
     if (!allowedKind || !payload.scope_id) return fail("Master Franchise Owners may invite only franchise owners to a franchise or principals to a school in their own network.", 403);

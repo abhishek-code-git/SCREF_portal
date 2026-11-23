@@ -118,6 +118,7 @@ export function useSchoolContext() {
   const { user, ready } = useSessionUser();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [activeMasterFranchiseId, setActiveMasterFranchiseId] = useState<string | null>(null);
+  const [activeWorkspaceSchoolId, setActiveWorkspaceSchoolId] = useState<string | null>(null);
   const [selectionReady, setSelectionReady] = useState(false);
   const contextQuery = useQuery<{ memberships: Membership[]; schools: School[] }, Error>({
     queryKey: ["school-context", user?.id],
@@ -128,10 +129,15 @@ export function useSchoolContext() {
       if (membershipResult.error) throw membershipResult.error;
       const memberships = (membershipResult.data ?? []) as Membership[];
       const ids = [...new Set(memberships.map((membership) => membership.school_id).filter((id): id is string => !!id))];
-      if (!ids.length) return { memberships, schools: [] };
-      const schoolResult = await supabase.from("schools").select("*").in("id", ids);
-      if (schoolResult.error) throw schoolResult.error;
-      return { memberships, schools: (schoolResult.data ?? []) as School[] };
+      const franchiseIds = [...new Set(memberships.filter((membership) => membership.role === "franchise_owner" && membership.franchise_id).map((membership) => membership.franchise_id!))];
+      const [directSchools, franchiseSchools] = await Promise.all([
+        ids.length ? supabase.from("schools").select("*").in("id", ids) : Promise.resolve({ data: [], error: null }),
+        franchiseIds.length ? supabase.from("schools").select("*").in("franchise_id", franchiseIds) : Promise.resolve({ data: [], error: null }),
+      ]);
+      const issue = directSchools.error ?? franchiseSchools.error;
+      if (issue) throw issue;
+      const schools = [...(directSchools.data ?? []), ...(franchiseSchools.data ?? [])] as School[];
+      return { memberships, schools: [...new Map(schools.map((school) => [school.id, school])).values()] };
     },
   });
   const memberships = useMemo(() => contextQuery.data?.memberships ?? [], [contextQuery.data?.memberships]);
@@ -146,7 +152,7 @@ export function useSchoolContext() {
       return (data ?? []) as MasterFranchise[];
     },
   });
-  const schools = contextQuery.data?.schools ?? [];
+  const schools = useMemo(() => contextQuery.data?.schools ?? [], [contextQuery.data?.schools]);
   const error = contextQuery.error?.message ?? masterQuery.error?.message ?? null;
   const loaded = !user || (!contextQuery.isPending && (masterIds.length === 0 || !masterQuery.isPending));
 
@@ -154,6 +160,7 @@ export function useSchoolContext() {
     if (!user) {
       setSelectedMembershipId(null);
       setActiveMasterFranchiseId(null);
+      setActiveWorkspaceSchoolId(null);
       setSelectionReady(true);
       return;
     }
@@ -164,19 +171,31 @@ export function useSchoolContext() {
     let storedMembershipId: string | null = null;
     try { storedMembershipId = window.localStorage.getItem(`active-membership:${user.id}`); } catch { /* storage may be unavailable */ }
     setSelectedMembershipId(memberships.length === 1 ? memberships[0]!.id : memberships.some((m) => m.id === storedMembershipId) ? storedMembershipId : null);
+    let savedSchoolId: string | null = null;
+    try { savedSchoolId = window.localStorage.getItem(`active-workspace-school:${user.id}`); } catch { /* storage may be unavailable */ }
+    setActiveWorkspaceSchoolId(schools.some((school) => school.id === savedSchoolId) ? savedSchoolId : schools[0]?.id ?? null);
     let saved: string | null = null;
     try { saved = window.localStorage.getItem(`active-master-franchise:${user.id}`); } catch { /* storage may be unavailable */ }
     const next = masterIds.includes(saved ?? "") ? saved : masterIds[0] ?? null;
     setActiveMasterFranchiseId(next);
     setSelectionReady(true);
-  }, [user, contextQuery.data, memberships, masterIds]);
+  }, [user, contextQuery.data, memberships, masterIds, schools]);
 
   const activeMembership = memberships.length === 1
     ? memberships[0]
     : memberships.find((m) => m.id === selectedMembershipId);
-  const activeSchool = activeMembership?.school_id
+  const activeSchool = activeWorkspaceSchoolId
+    ? schools.find((school) => school.id === activeWorkspaceSchoolId) ?? null
+    : activeMembership?.school_id
     ? (schools.find((s) => s.id === activeMembership.school_id) ?? null)
     : null;
+  const setActiveSchool = (schoolId: string) => {
+    if (!schools.some((school) => school.id === schoolId)) return;
+    setActiveWorkspaceSchoolId(schoolId);
+    if (user) {
+      try { window.localStorage.setItem(`active-workspace-school:${user.id}`, schoolId); } catch { /* selection remains active for this page */ }
+    }
+  };
   const setActiveMembership = (membershipId: string) => {
     setSelectedMembershipId(membershipId);
     if (user) {
@@ -203,6 +222,8 @@ export function useSchoolContext() {
     activeMasterFranchiseId,
     setActiveMasterFranchise: selectMasterFranchise,
     schools,
+    workspaceSchools: schools,
+    setActiveSchool,
     activeSchool,
     activeMembership,
     activeRole: activeMembership?.role,
