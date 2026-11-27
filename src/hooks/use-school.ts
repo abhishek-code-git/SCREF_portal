@@ -24,6 +24,11 @@ export type School = {
   address: string;
   academic_year: string;
   status: string;
+  franchise_id: string | null;
+  phone: string;
+  email: string;
+  principal_name: string;
+  logo_url: string;
 };
 
 export type Membership = {
@@ -35,6 +40,21 @@ export type Membership = {
 };
 
 export type MasterFranchise = { id: string; name: string; status: string };
+export type OwnedFranchise = {
+  id: string;
+  name: string;
+  code: string | null;
+  status: string;
+  master_name: string;
+  master_status: string;
+  territory: string | null;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  owner_name: string;
+};
 
 export function franchiseOwnerScope(membership: Membership): "master" | "franchise" | "school" | null {
   if (membership.role !== "franchise_owner") return null;
@@ -76,9 +96,22 @@ export const ROLE_PAGES: Record<AppRole, string[]> = {
   central_super_admin: [ALL],
   central_ops_admin: [ALL],
   franchise_owner: [ALL],
-  school_principal: [ALL],
-  teacher: ["/teacher", "/attendance", "/students", "/academics", "/communication", "/support", "/settings"],
-  admissions_staff: ["/dashboard", "/admissions", "/students", "/parents", "/communication", "/support", "/settings"],
+  school_principal: [
+    "/principal",
+    "/classes",
+    "/students",
+    "/students/promote",
+    "/staff",
+    "/attendance",
+    "/exams",
+    "/notices",
+    "/admissions",
+    "/reports",
+    "/settings",
+    "/support",
+  ],
+  teacher: ["/teacher", "/teacher/classes", "/teacher/timetable", "/teacher/attendance", "/teacher/homework", "/teacher/marks", "/teacher/notices", "/support", "/settings"],
+  admissions_staff: ["/dashboard", "/admissions", "/students", "/support", "/settings"],
   accountant: ["/dashboard", "/finance", "/students", "/reports", "/support", "/settings"],
   transport_manager: ["/dashboard", "/transport", "/students", "/support", "/settings"],
   parent: ["/support", "/settings"],
@@ -97,14 +130,36 @@ export function canOpen(role: AppRole | undefined, path: string, membership?: Me
     return role === "franchise_owner" || isCentralRole(role);
   }
   const pages = ROLE_PAGES[role];
-  return pages.includes(ALL) || pages.includes(path);
+  if (pages.includes(ALL) || pages.includes(path)) return true;
+  if (pages.includes("/students") && path.startsWith("/students/")) return true;
+  return false;
 }
 
-export function homeFor(role: AppRole | undefined, membership?: Membership): "/teacher" | "/student" | "/dashboard" | "/franchise/dashboard" | "/master/dashboard" {
+export function homeFor(role: AppRole | undefined, membership?: Membership): "/principal" | "/teacher" | "/student" | "/dashboard" | "/franchise/dashboard" | "/master/dashboard" {
+  if (role === "school_principal") return "/principal";
   if (role === "teacher") return "/teacher";
   if (role === "student") return "/student";
   if (role === "franchise_owner") return franchiseOwnerScope(membership ?? { id: "", school_id: null, master_franchise_id: null, franchise_id: null, role }) === "master" ? "/master/dashboard" : "/franchise/dashboard";
   return "/dashboard";
+}
+
+export function useSchoolWritable(schoolId: string | undefined) {
+  const { user } = useSessionUser();
+  const query = useQuery<boolean, Error>({
+    queryKey: ["school-writable", schoolId, user?.id],
+    enabled: !!schoolId && !!user,
+    queryFn: async () => {
+      if (!schoolId) return false;
+      const { data, error } = await supabase.rpc("school_is_writable", { _school_id: schoolId });
+      if (error) throw error;
+      return !!data;
+    },
+  });
+  return {
+    isWritable: query.data ?? false,
+    writableLoading: query.isPending,
+    writableError: query.error?.message ?? null,
+  };
 }
 
 export const LEADERSHIP: AppRole[] = ["central_super_admin", "central_ops_admin", "franchise_owner", "school_principal"];
@@ -118,6 +173,7 @@ export function useSchoolContext() {
   const { user, ready } = useSessionUser();
   const [selectedMembershipId, setSelectedMembershipId] = useState<string | null>(null);
   const [activeMasterFranchiseId, setActiveMasterFranchiseId] = useState<string | null>(null);
+  const [activeFranchiseId, setActiveFranchiseId] = useState<string | null>(null);
   const [activeWorkspaceSchoolId, setActiveWorkspaceSchoolId] = useState<string | null>(null);
   const [selectionReady, setSelectionReady] = useState(false);
   const contextQuery = useQuery<{ memberships: Membership[]; schools: School[] }, Error>({
@@ -142,6 +198,7 @@ export function useSchoolContext() {
   });
   const memberships = useMemo(() => contextQuery.data?.memberships ?? [], [contextQuery.data?.memberships]);
   const masterMemberships = useMemo(() => memberships.filter((membership) => franchiseOwnerScope(membership) === "master"), [memberships]);
+  const franchiseMemberships = useMemo(() => memberships.filter((membership) => franchiseOwnerScope(membership) === "franchise"), [memberships]);
   const masterIds = useMemo(() => [...new Set(masterMemberships.map((membership) => membership.master_franchise_id).filter((id): id is string => !!id))], [masterMemberships]);
   const masterQuery = useQuery<MasterFranchise[], Error>({
     queryKey: ["master-franchises-for-user", user?.id, masterIds],
@@ -152,14 +209,29 @@ export function useSchoolContext() {
       return (data ?? []) as MasterFranchise[];
     },
   });
+  const myFranchisesQuery = useQuery<OwnedFranchise[], Error>({
+    queryKey: ["my-franchises", user?.id],
+    enabled: ready && !!user && franchiseMemberships.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("my_franchises");
+      if (error) throw error;
+      return (data ?? []) as OwnedFranchise[];
+    },
+  });
+  const myFranchises = useMemo(() => myFranchisesQuery.data ?? [], [myFranchisesQuery.data]);
   const schools = useMemo(() => contextQuery.data?.schools ?? [], [contextQuery.data?.schools]);
-  const error = contextQuery.error?.message ?? masterQuery.error?.message ?? null;
-  const loaded = !user || (!contextQuery.isPending && (masterIds.length === 0 || !masterQuery.isPending));
+  const error = contextQuery.error?.message ?? masterQuery.error?.message ?? myFranchisesQuery.error?.message ?? null;
+  const loaded =
+    !user ||
+    (!contextQuery.isPending &&
+      (masterIds.length === 0 || !masterQuery.isPending) &&
+      (franchiseMemberships.length === 0 || !myFranchisesQuery.isPending));
 
   useEffect(() => {
     if (!user) {
       setSelectedMembershipId(null);
       setActiveMasterFranchiseId(null);
+      setActiveFranchiseId(null);
       setActiveWorkspaceSchoolId(null);
       setSelectionReady(true);
       return;
@@ -178,20 +250,32 @@ export function useSchoolContext() {
     try { saved = window.localStorage.getItem(`active-master-franchise:${user.id}`); } catch { /* storage may be unavailable */ }
     const next = masterIds.includes(saved ?? "") ? saved : masterIds[0] ?? null;
     setActiveMasterFranchiseId(next);
+    let savedFranchise: string | null = null;
+    try { savedFranchise = window.localStorage.getItem(`active-franchise:${user.id}`); } catch { /* storage may be unavailable */ }
+    const franchiseIds = myFranchises.map((f) => f.id);
+    const nextFranchise = franchiseIds.includes(savedFranchise ?? "") ? savedFranchise : franchiseIds[0] ?? franchiseMemberships[0]?.franchise_id ?? null;
+    setActiveFranchiseId(nextFranchise);
     setSelectionReady(true);
-  }, [user, contextQuery.data, memberships, masterIds, schools]);
+  }, [user, contextQuery.data, memberships, masterIds, schools, myFranchises, franchiseMemberships]);
 
   const activeMembership = memberships.length === 1
     ? memberships[0]
     : memberships.find((m) => m.id === selectedMembershipId);
-  const activeSchool = activeWorkspaceSchoolId
-    ? schools.find((school) => school.id === activeWorkspaceSchoolId) ?? null
-    : activeMembership?.school_id
+  const activeSchool = activeMembership?.school_id
     ? (schools.find((s) => s.id === activeMembership.school_id) ?? null)
+    : activeWorkspaceSchoolId
+    ? (schools.find((school) => school.id === activeWorkspaceSchoolId) ?? null)
     : null;
   const setActiveSchool = (schoolId: string) => {
     if (!schools.some((school) => school.id === schoolId)) return;
     setActiveWorkspaceSchoolId(schoolId);
+    const matchingMembership = memberships.find((m) => m.school_id === schoolId);
+    if (matchingMembership) {
+      setSelectedMembershipId(matchingMembership.id);
+      if (user) {
+        try { window.localStorage.setItem(`active-membership:${user.id}`, matchingMembership.id); } catch { /* storage may be unavailable */ }
+      }
+    }
     if (user) {
       try { window.localStorage.setItem(`active-workspace-school:${user.id}`, schoolId); } catch { /* selection remains active for this page */ }
     }
@@ -209,7 +293,22 @@ export function useSchoolContext() {
       try { window.localStorage.setItem(`active-master-franchise:${user.id}`, masterId); } catch { /* selection remains active for this page */ }
     }
   };
+  const selectFranchise = (franchiseId: string) => {
+    if (!myFranchises.some((f) => f.id === franchiseId) && !franchiseMemberships.some((m) => m.franchise_id === franchiseId)) return;
+    setActiveFranchiseId(franchiseId);
+    const matchingMembership = franchiseMemberships.find((m) => m.franchise_id === franchiseId);
+    if (matchingMembership) {
+      setSelectedMembershipId(matchingMembership.id);
+      if (user) {
+        try { window.localStorage.setItem(`active-membership:${user.id}`, matchingMembership.id); } catch { /* storage may be unavailable */ }
+      }
+    }
+    if (user) {
+      try { window.localStorage.setItem(`active-franchise:${user.id}`, franchiseId); } catch { /* selection remains active for this page */ }
+    }
+  };
   const activeMasterFranchise = masterQuery.data?.find((master) => master.id === activeMasterFranchiseId) ?? null;
+  const activeFranchise = myFranchises.find((f) => f.id === activeFranchiseId) ?? null;
 
   return {
     user,
@@ -217,10 +316,15 @@ export function useSchoolContext() {
     error,
     memberships,
     masterMemberships,
+    franchiseMemberships,
     masterFranchises: masterQuery.data ?? [],
     activeMasterFranchise,
     activeMasterFranchiseId,
     setActiveMasterFranchise: selectMasterFranchise,
+    myFranchises,
+    activeFranchise,
+    activeFranchiseId,
+    setActiveFranchise: selectFranchise,
     schools,
     workspaceSchools: schools,
     setActiveSchool,

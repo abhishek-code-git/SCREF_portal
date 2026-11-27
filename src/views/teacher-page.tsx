@@ -1,93 +1,218 @@
 "use client";
 
-import { CheckCheck, DoorOpen, Save } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { CalendarCheck, Clock, BookOpen, PenLine, Megaphone, Users } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Panel, StatGrid } from "@/components/kit";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useSchoolContext } from "@/hooks/use-school";
+import { useTeacherClasses } from "@/hooks/use-teacher-classes";
 import { supabase } from "@/integrations/supabase/client";
-import { classLabel, todayISO, type AttStatus, type ClassRow, type StudentRow } from "@/lib/school-data";
-import { cn } from "@/lib/utils";
+import { classLabel, todayISO } from "@/lib/school-data";
 
-const STATUSES: { key: AttStatus; label: string }[] = [
-  { key: "present", label: "P" }, { key: "absent", label: "A" }, { key: "late", label: "L" }, { key: "leave", label: "Lv" },
-];
+type TimetableSlot = { id: string; class_id: string; subject_id: string | null; day_of_week: number; period: number; start_time: string; end_time: string };
+type HomeworkRow = { id: string; class_id: string; title: string; due_date: string | null };
+type ExamRow = { id: string; name: string; status: string };
+type NoticeRow = { id: string; title: string; created_at: string };
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function todayDow(): number {
+  const jsDay = new Date().getDay(); // 0=Sun
+  return jsDay === 0 ? 6 : jsDay - 1; // 0=Mon
+}
 
 export function TeacherPage() {
   const { user, activeSchool, activeRole, ready, error } = useSchoolContext();
-  const [classes, setClasses] = useState<ClassRow[]>([]);
-  const [students, setStudents] = useState<StudentRow[]>([]);
-  const [classId, setClassId] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [marks, setMarks] = useState<Record<string, AttStatus>>({});
+  const { classes, loading: classesLoading } = useTeacherClasses();
+  const [slots, setSlots] = useState<TimetableSlot[]>([]);
+  const [unmarkedClasses, setUnmarkedClasses] = useState<string[]>([]);
+  const [upcomingHw, setUpcomingHw] = useState<(HomeworkRow & { className: string })[]>([]);
+  const [openExams, setOpenExams] = useState<ExamRow[]>([]);
+  const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
-  const loadAssignments = useCallback(async () => {
-    if (!activeSchool || !user || activeRole !== "teacher") { setClasses([]); setLoading(false); return; }
+  const loadToday = useCallback(async () => {
+    if (!activeSchool || !user || activeRole !== "teacher") { setLoading(false); return; }
     setLoading(true);
-    const { data, error: loadError } = await supabase.from("classes").select("id,name,section,class_teacher").eq("school_id", activeSchool.id).eq("class_teacher", user.id).order("name").order("section");
-    if (loadError) { toast.error(`Unable to load assigned classes: ${loadError.message}`); setClasses([]); }
-    else setClasses((data ?? []) as ClassRow[]);
-    setLoading(false);
-  }, [activeSchool, activeRole, user]);
+    const today = todayISO();
+    const dow = todayDow();
 
-  useEffect(() => { void loadAssignments(); }, [loadAssignments]);
-
-  const selectedClass = classes.find((item) => item.id === classId);
-  const loadClassRecords = useCallback(async () => {
-    if (!selectedClass) { setStudents([]); setMarks({}); return; }
-    setLoading(true);
-    const [studentResult, attendanceResult] = await Promise.all([
-      supabase.from("students").select("id,full_name,roll_no,class_id").eq("class_id", selectedClass.id).order("roll_no"),
-      supabase.from("attendance_records").select("student_id,status").eq("class_id", selectedClass.id).eq("att_date", date),
+    const [slotsRes, attRes, hwRes, examsRes, noticesRes] = await Promise.all([
+      supabase.from("timetable_slots").select("id,class_id,subject_id,day_of_week,period,start_time,end_time").eq("school_id", activeSchool.id).eq("teacher_user_id", user.id).eq("day_of_week", dow).order("period"),
+      supabase.from("attendance_records").select("class_id").eq("school_id", activeSchool.id).eq("att_date", today),
+      supabase.from("homework").select("id,class_id,title,due_date").eq("school_id", activeSchool.id).eq("created_by", user.id).gte("due_date", today).order("due_date").limit(5),
+      supabase.from("exams").select("id,name,status").eq("school_id", activeSchool.id).eq("status", "marks_open"),
+      supabase.from("notices").select("id,title,created_at").eq("school_id", activeSchool.id).eq("published", true).order("created_at", { ascending: false }).limit(5),
     ]);
-    if (studentResult.error || attendanceResult.error) toast.error(`Unable to load class records: ${(studentResult.error ?? attendanceResult.error)?.message}`);
-    setStudents((studentResult.data ?? []) as StudentRow[]);
-    setMarks(Object.fromEntries((attendanceResult.data ?? []).map((r) => [r.student_id, r.status as AttStatus])));
+
+    setSlots((slotsRes.data ?? []) as TimetableSlot[]);
+
+    // Figure out which of my classes have no attendance marked today
+    const markedClassIds = new Set((attRes.data ?? []).map((r) => r.class_id));
+    setUnmarkedClasses(classes.filter((c) => !markedClassIds.has(c.id)).map((c) => c.id));
+
+    setUpcomingHw((hwRes.data ?? []).map((h) => {
+      const cls = classes.find((c) => c.id === (h as HomeworkRow).class_id);
+      return { ...(h as HomeworkRow), className: cls ? classLabel(cls) : "Class" };
+    }));
+    setOpenExams((examsRes.data ?? []) as ExamRow[]);
+    setNotices((noticesRes.data ?? []) as NoticeRow[]);
     setLoading(false);
-  }, [date, selectedClass]);
+  }, [activeSchool, activeRole, user, classes]);
 
-  useEffect(() => { void loadClassRecords(); }, [loadClassRecords]);
-
-  const counts = useMemo(() => {
-    const tally = { present: 0, absent: 0, late: 0, leave: 0 };
-    Object.values(marks).forEach((status) => { tally[status] += 1; });
-    return tally;
-  }, [marks]);
+  useEffect(() => { if (classes.length > 0 || !classesLoading) void loadToday(); }, [loadToday, classes, classesLoading]);
 
   if (!ready) return <AppShell title="Teacher's Desk"><div className="surface-panel h-40 animate-pulse" /></AppShell>;
   if (error) return <AppShell title="Teacher's Desk"><Panel title="School access unavailable">{error}</Panel></AppShell>;
   if (!activeSchool || !user) return <AppShell title="Teacher's Desk"><Panel title="No school assigned">Ask your principal to assign your account to a school.</Panel></AppShell>;
   if (activeRole !== "teacher") return <AppShell title="Teacher's Desk"><Panel title="Choose your teacher workspace">Select an active teacher membership to view assigned classes.</Panel></AppShell>;
 
-  const save = async () => {
-    if (!selectedClass || !user || !students.length) return;
-    const rows = students.filter((student) => marks[student.id]).map((student) => ({ school_id: activeSchool.id, class_id: selectedClass.id, student_id: student.id, att_date: date, status: marks[student.id]!, marked_by: user.id }));
-    if (!rows.length) { toast.error("Mark at least one student first"); return; }
-    setSaving(true);
-    const { error: saveError } = await supabase.from("attendance_records").upsert(rows, { onConflict: "student_id,att_date" });
-    setSaving(false);
-    if (saveError) { toast.error(`Attendance could not be saved: ${saveError.message}`); return; }
-    toast.success(`Attendance saved for ${rows.length} students`);
-  };
+  const isLoading = loading || classesLoading;
 
-  return <AppShell title="Teacher's Desk" subtitle={`${activeSchool.name} · Assigned classes`}>
-    <div className="space-y-6">
-      <Panel title="My assigned classes" subtitle="Only classes assigned to your teacher account appear here.">
-        {loading && !classes.length ? <p className="py-6 text-sm text-muted-foreground">Loading your assignments…</p> : classes.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No classes are assigned to your account. Ask your principal to assign a class.</p> : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{classes.map((cls) => <article key={cls.id} className={cn("rounded-lg border p-4", classId === cls.id ? "border-primary bg-primary/5" : "border-border")}><p className="font-semibold">{classLabel(cls)}</p><p className="mt-1 text-xs text-muted-foreground">{activeSchool.name} · Class teacher assignment</p><Button className="mt-4 w-full" variant={classId === cls.id ? "default" : "outline"} onClick={() => setClassId(cls.id)}><DoorOpen className="mr-2 h-4 w-4" />{classId === cls.id ? "Selected" : "Enter class"}</Button></article>)}</div>}
-      </Panel>
+  return (
+    <AppShell title="Teacher's Desk" subtitle={`${activeSchool.name} · Today`}>
+      <div className="space-y-6">
+        <StatGrid items={[
+          ["My Classes", isLoading ? "…" : String(classes.length), "Assigned to you"],
+          ["Today's Periods", isLoading ? "…" : String(slots.length), DAY_NAMES[todayDow()] ?? ""],
+          ["Attendance Pending", isLoading ? "…" : String(unmarkedClasses.length), "Classes unmarked today"],
+          ["Open Exams", isLoading ? "…" : String(openExams.length), "Marks entry available"],
+        ]} />
 
-      {selectedClass && <>
-        <StatGrid items={[["Students", String(students.length), classLabel(selectedClass)], ["Present", String(counts.present + counts.late), `${counts.late} late`], ["Absent", String(counts.absent), date], ["Unmarked", String(Math.max(0, students.length - Object.keys(marks).length)), "Selected class"]]} />
-        <Panel title={`Attendance · ${classLabel(selectedClass)}`} subtitle="View assigned class students and record attendance." action={<div className="flex flex-wrap gap-2"><Input type="date" max={todayISO()} value={date} onChange={(event) => setDate(event.target.value)} className="h-9 w-40" /><Button variant="outline" size="sm" disabled={!students.length} onClick={() => setMarks(Object.fromEntries(students.map((student) => [student.id, "present" as AttStatus])))}><CheckCheck className="mr-2 h-4 w-4" />All present</Button><Button size="sm" disabled={saving || loading || !students.length} onClick={save}><Save className="mr-2 h-4 w-4" />{saving ? "Saving…" : "Save"}</Button></div>}>
-          {loading ? <p className="py-6 text-sm text-muted-foreground">Loading class records…</p> : students.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No students are enrolled in this class.</p> : <ul className="divide-y divide-border">{students.map((student) => <li key={student.id} className="flex items-center justify-between gap-3 py-2.5"><span className="text-sm"><span className="mr-3 inline-block w-8 text-muted-foreground tabular-nums">{student.roll_no}</span>{student.full_name}</span><div className="flex gap-1">{STATUSES.map((status) => <button key={status.key} onClick={() => setMarks((current) => ({ ...current, [student.id]: status.key }))} aria-label={`${student.full_name}: ${status.key}`} className={cn("h-8 min-w-9 rounded-md border px-2 text-xs font-semibold", marks[student.id] === status.key ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:bg-secondary")}>{status.label}</button>)}</div></li>)}</ul>}
+        {classes.length === 0 && !isLoading && (
+          <Panel title="No classes assigned">
+            <p className="py-8 text-center text-sm text-muted-foreground">Ask your principal to assign a class to your account.</p>
+          </Panel>
+        )}
+
+        {/* Today's periods */}
+        <Panel title="Today's Timetable" subtitle={`${DAY_NAMES[todayDow()]} · ${slots.length} period(s)`} action={<Link href="/teacher/timetable" className="text-xs text-primary hover:underline">Full timetable →</Link>}>
+          {isLoading ? <p className="py-6 text-sm text-muted-foreground">Loading…</p> : slots.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No periods scheduled for today.</p> : (
+            <ul className="divide-y divide-border">
+              {slots.map((slot) => {
+                const cls = classes.find((c) => c.id === slot.class_id);
+                return (
+                  <li key={slot.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary">{slot.period}</span>
+                      <div>
+                        <p className="text-sm font-medium">{cls ? classLabel(cls) : "Class"}</p>
+                        <p className="text-xs text-muted-foreground">Period {slot.period}</p>
+                      </div>
+                    </div>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" />{slot.start_time.slice(0, 5)} – {slot.end_time.slice(0, 5)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Panel>
-      </>}
-      <p className="text-xs text-muted-foreground">Timetable, subjects, homework, lesson plans, assessments and announcements do not have live tables in this project yet.</p>
-    </div>
-  </AppShell>;
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Attendance pending */}
+          <Panel title="Attendance Pending" subtitle="Classes with no attendance marked today" action={<Link href="/teacher/attendance" className="text-xs text-primary hover:underline">Mark attendance →</Link>}>
+            {isLoading ? <p className="py-4 text-sm text-muted-foreground">Loading…</p> : unmarkedClasses.length === 0 ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                <CalendarCheck className="h-4 w-4 text-green-600" /> All classes marked for today
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {unmarkedClasses.map((cid) => {
+                  const cls = classes.find((c) => c.id === cid);
+                  return cls ? (
+                    <li key={cid} className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                      <span className="text-sm font-medium">{classLabel(cls)}</span>
+                      <Link href="/teacher/attendance" className="text-xs font-medium text-primary hover:underline">Mark now</Link>
+                    </li>
+                  ) : null;
+                })}
+              </ul>
+            )}
+          </Panel>
+
+          {/* Upcoming homework */}
+          <Panel title="Upcoming Homework" subtitle="Due soon" action={<Link href="/teacher/homework" className="text-xs text-primary hover:underline">All homework →</Link>}>
+            {isLoading ? <p className="py-4 text-sm text-muted-foreground">Loading…</p> : upcomingHw.length === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">No upcoming homework.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {upcomingHw.map((hw) => (
+                  <li key={hw.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div>
+                      <p className="text-sm font-medium">{hw.title}</p>
+                      <p className="text-xs text-muted-foreground">{hw.className}</p>
+                    </div>
+                    {hw.due_date && <span className="whitespace-nowrap text-xs text-muted-foreground">Due {hw.due_date}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Open exams */}
+          <Panel title="Open Exams" subtitle="Marks entry available" action={<Link href="/teacher/marks" className="text-xs text-primary hover:underline">Enter marks →</Link>}>
+            {isLoading ? <p className="py-4 text-sm text-muted-foreground">Loading…</p> : openExams.length === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">No exams with open marks entry.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {openExams.map((exam) => (
+                  <li key={exam.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <PenLine className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-medium">{exam.name}</span>
+                    </div>
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-green-700 dark:bg-green-900/30 dark:text-green-400">Open</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          {/* Latest notices */}
+          <Panel title="Latest Notices" action={<Link href="/teacher/notices" className="text-xs text-primary hover:underline">All notices →</Link>}>
+            {isLoading ? <p className="py-4 text-sm text-muted-foreground">Loading…</p> : notices.length === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">No recent notices.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {notices.map((n) => (
+                  <li key={n.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Megaphone className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm">{n.title}</span>
+                    </div>
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">{new Date(n.created_at).toLocaleDateString("en-IN")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
+
+        {/* Quick links */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "My Classes", to: "/teacher/classes", icon: Users, desc: "View students" },
+            { label: "Homework", to: "/teacher/homework", icon: BookOpen, desc: "Assign work" },
+            { label: "Marks", to: "/teacher/marks", icon: PenLine, desc: "Enter exam marks" },
+            { label: "Notices", to: "/teacher/notices", icon: Megaphone, desc: "Post a notice" },
+          ].map((item) => (
+            <Link key={item.to} href={item.to} className="surface-panel flex items-center gap-3 p-4 transition-colors hover:bg-secondary/50">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <item.icon className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-medium">{item.label}</p>
+                <p className="text-xs text-muted-foreground">{item.desc}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </AppShell>
+  );
 }

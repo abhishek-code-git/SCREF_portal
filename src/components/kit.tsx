@@ -1,7 +1,16 @@
-import { Download, Search } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Download, Lock, Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 export function Pill({ tone = "muted", children }: { tone?: "navy" | "red" | "muted"; children: ReactNode }) {
@@ -190,7 +199,95 @@ export function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm font-medium">{value}</p>
+      <div className="mt-0.5 text-sm font-medium">{value}</div>
     </div>
+  );
+}
+
+export function PrincipalBreadcrumb({
+  items,
+}: {
+  items: { label: string; href?: string }[];
+}) {
+  return (
+    <nav aria-label="Breadcrumb" className="print:hidden flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+      <Link href="/principal" className="hover:text-foreground hover:underline">
+        Overview
+      </Link>
+      {items.map((item, idx) => (
+        <span key={`${item.label}-${idx}`} className="inline-flex items-center gap-1.5">
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+          {item.href ? (
+            <Link href={item.href} className="hover:text-foreground hover:underline">
+              {item.label}
+            </Link>
+          ) : (
+            <span className="font-medium text-foreground">{item.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+export function ReadOnlyBanner({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <div
+      role="status"
+      className="print:hidden flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm"
+    >
+      <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+      <div>
+        <p className="font-semibold text-foreground">This school is read only (suspended or inactive)</p>
+        <p className="text-xs text-muted-foreground">
+          You can view and export records, while creating, editing, and deleting data are disabled until your school and franchise are active.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = "Confirm",
+  destructive = false,
+  busy = false,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  destructive?: boolean;
+  busy?: boolean;
+  onConfirm: () => void | Promise<void>;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant={destructive ? "destructive" : "default"}
+            disabled={busy}
+            onClick={() => void onConfirm()}
+          >
+            {busy ? "Working…" : confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

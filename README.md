@@ -41,7 +41,14 @@ npm run lint
 npm run build
 ```
 
-After changing RLS policies, run `supabase/tests/rls-isolation.sql` in Supabase SQL Editor inside a transaction and roll it back. Every check must print `PASS`.
+After changing RLS policies, run `supabase/tests/rls-isolation.sql`, `supabase/tests/franchisee-security.sql`, `supabase/tests/franchisee-finalization.sql`, `supabase/tests/school-academics-security.sql`, and `supabase/tests/principal-finalization.sql` in Supabase SQL Editor inside a transaction and roll it back. Every check must print `PASS`.
+
+## Module Status
+
+- **Complete (live Supabase-backed)**: Central Admin (`/admin/*`), Master Franchisee (`/master/*`), Franchisee (`/franchise/dashboard`, `/franchise/schools`, `/franchise/schools/[id]`, `/franchise/team`, `/franchise/reports`, `/franchise/settings`), Principal Dashboard (`/principal`, `/classes`, `/students`, `/students/promote`, `/students/[id]`, `/students/[id]/transfer-certificate`, `/staff`, `/attendance`, `/exams`, `/notices`, `/admissions`, `/reports`, `/settings`), and Teacher Dashboard (`/teacher/*`).
+- **Not built yet (out of scope / prototype fixtures gated by `NEXT_PUBLIC_DEMO_MODE`)**: Fees & finance (`/finance`), parent accounts & portal (`/parents`), transport tracking (`/transport`), SMS/WhatsApp notifications (`/communication`), PDF report cards, leave management, and biometric attendance.
+
+See [docs/principal-qa.md](docs/principal-qa.md) for the manual verification script and [docs/role-permissions.md](docs/role-permissions.md) for the RLS permission matrix.
 
 ## Layout
 

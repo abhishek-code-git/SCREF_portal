@@ -1,152 +1,412 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarCheck,
+  GraduationCap,
+  Megaphone,
+  Plus,
+  Trash2,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
-import { Panel, StatGrid } from "@/components/kit";
+import { ConfirmDialog, Panel, Pill, StatGrid } from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useSchoolContext } from "@/hooks/use-school";
+import { useSchoolContext, useSchoolWritable } from "@/hooks/use-school";
 import { supabase } from "@/integrations/supabase/client";
 
-type SchoolClass = { id: string; name: string; section: string; class_teacher: string | null };
-type Student = { id: string; full_name: string; roll_no: number; class_id: string; status: string };
-type Staff = { user_id: string; full_name: string; role: string };
-type Task = { id: string; title: string; done: boolean; due_date: string | null };
+type OverviewRow = {
+  class_count: number;
+  student_count: number;
+  teacher_count: number;
+  attendance_today_marked: number;
+  attendance_today_present: number;
+  classes_without_attendance_today: number;
+  classes_without_class_teacher: number;
+  classes_without_timetable: number;
+  exams_open_for_marks: number;
+  exams_ready_to_publish: number;
+  enquiries_total: number;
+  enquiries_followup_due: number;
+  notices_last_7_days: number;
+};
 
-function PrincipalTasks() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+type Task = { id: string; title: string; done: boolean; due_date: string | null };
+type NoticePreview = { id: string; title: string; audience: string; pinned: boolean; created_at: string };
+
+function PrincipalTasks({ schoolId, isWritable }: { schoolId: string; isWritable: boolean }) {
+  const { user } = useSchoolContext();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const load = useCallback(async () => {
-    const { data, error } = await supabase.from("principal_tasks").select("id,title,done,due_date").order("done").order("created_at", { ascending: false });
-    if (error) toast.error(`Unable to load your tasks: ${error.message}`);
-    else setTasks(data ?? []);
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const add = async (event: FormEvent<HTMLFormElement>) => {
+  const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
+
+  const tasksQuery = useQuery<Task[], Error>({
+    queryKey: ["principal-tasks", schoolId, user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("principal_tasks")
+        .select("id,title,done,due_date")
+        .order("done")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("principal_tasks")
+        .insert({ title: title.trim(), due_date: dueDate || null });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      setTitle("");
+      setDueDate("");
+      toast.success("Task added");
+      await queryClient.invalidateQueries({ queryKey: ["principal-tasks", schoolId, user?.id] });
+    },
+    onError: (err: Error) => toast.error(`Unable to add task: ${err.message}`),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async (task: Task) => {
+      const { error } = await supabase
+        .from("principal_tasks")
+        .update({ done: !task.done })
+        .eq("id", task.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["principal-tasks", schoolId, user?.id] });
+    },
+    onError: (err: Error) => toast.error(`Unable to update task: ${err.message}`),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (taskId: string) => {
+      const { error } = await supabase.from("principal_tasks").delete().eq("id", taskId);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      setConfirmDelete(null);
+      toast.success("Task removed");
+      await queryClient.invalidateQueries({ queryKey: ["principal-tasks", schoolId, user?.id] });
+    },
+    onError: (err: Error) => toast.error(`Unable to delete task: ${err.message}`),
+  });
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const { error } = await supabase.from("principal_tasks").insert({ title: title.trim(), due_date: dueDate || null });
-    if (error) { toast.error(`Unable to add task: ${error.message}`); return; }
-    setTitle(""); setDueDate(""); await load();
+    if (!title.trim() || !isWritable) return;
+    addMutation.mutate();
   };
-  const toggle = async (task: Task) => {
-    const { error } = await supabase.from("principal_tasks").update({ done: !task.done }).eq("id", task.id);
-    if (error) toast.error(`Unable to update task: ${error.message}`); else await load();
-  };
-  const remove = async (task: Task) => {
-    const { error } = await supabase.from("principal_tasks").delete().eq("id", task.id);
-    if (error) toast.error(`Unable to delete task: ${error.message}`); else await load();
-  };
-  return <Panel title="My tasks" subtitle="Private tasks saved to your account"><form onSubmit={add} className="mb-4 grid gap-2 sm:grid-cols-[1fr_180px_auto]"><Input required maxLength={180} placeholder="Add a school task" value={title} onChange={(event) => setTitle(event.target.value)} /><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /><Button>Add task</Button></form>{tasks.length ? <ul className="divide-y divide-border">{tasks.map((task) => <li key={task.id} className="flex items-center gap-3 py-2"><button className="flex-1 text-left text-sm" onClick={() => void toggle(task)}><span className={task.done ? "line-through text-muted-foreground" : ""}>{task.title}</span>{task.due_date && <span className="ml-2 text-xs text-muted-foreground">Due {task.due_date}</span>}</button><Button size="icon" variant="ghost" aria-label="Delete task" onClick={() => void remove(task)}><Trash2 className="h-4 w-4" /></Button></li>)}</ul> : <p className="py-4 text-sm text-muted-foreground">No tasks yet.</p>}</Panel>;
+
+  const tasks = tasksQuery.data ?? [];
+
+  return (
+    <Panel title="My tasks" subtitle="Private tasks saved to your account">
+      <form onSubmit={handleSubmit} className="mb-4 grid gap-2 sm:grid-cols-[1fr_170px_auto]">
+        <Input
+          required
+          maxLength={180}
+          placeholder="Add a school task"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          disabled={!isWritable || addMutation.isPending}
+        />
+        <Input
+          type="date"
+          aria-label="Task due date"
+          value={dueDate}
+          onChange={(event) => setDueDate(event.target.value)}
+          disabled={!isWritable || addMutation.isPending}
+        />
+        <Button type="submit" disabled={!isWritable || addMutation.isPending || !title.trim()}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          {addMutation.isPending ? "Adding…" : "Add task"}
+        </Button>
+      </form>
+      {tasksQuery.isPending ? (
+        <p className="py-4 text-sm text-muted-foreground">Loading tasks…</p>
+      ) : tasksQuery.error ? (
+        <p className="py-4 text-sm text-destructive">{tasksQuery.error.message}</p>
+      ) : tasks.length ? (
+        <ul className="divide-y divide-border">
+          {tasks.map((task) => (
+            <li key={task.id} className="flex items-center gap-3 py-2">
+              <button
+                type="button"
+                disabled={!isWritable || toggleMutation.isPending}
+                className="flex-1 text-left text-sm disabled:opacity-70"
+                onClick={() => toggleMutation.mutate(task)}
+              >
+                <span className={task.done ? "text-muted-foreground line-through" : ""}>
+                  {task.title}
+                </span>
+                {task.due_date && (
+                  <span className="ml-2 text-xs text-muted-foreground">Due {task.due_date}</span>
+                )}
+              </button>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={`Delete task ${task.title}`}
+                disabled={!isWritable}
+                onClick={() => setConfirmDelete(task)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="py-4 text-sm text-muted-foreground">No tasks yet.</p>
+      )}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(open) => { if (!open) setConfirmDelete(null); }}
+        title="Delete task"
+        description={`Remove "${confirmDelete?.title ?? ""}" from your tasks?`}
+        confirmLabel="Delete"
+        destructive
+        busy={deleteMutation.isPending}
+        onConfirm={() => { if (confirmDelete) deleteMutation.mutate(confirmDelete.id); }}
+      />
+    </Panel>
+  );
 }
 
 export function PrincipalPage() {
-  const { activeSchool, activeRole, ready, error: accessError } = useSchoolContext();
-  const [classes, setClasses] = useState<SchoolClass[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [attendanceToday, setAttendanceToday] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [className, setClassName] = useState("");
-  const [section, setSection] = useState("A");
-  const [saving, setSaving] = useState(false);
-  const [studentName, setStudentName] = useState("");
-  const [studentRoll, setStudentRoll] = useState("1");
-  const [studentClass, setStudentClass] = useState("");
+  const { activeSchool, ready, error: accessError } = useSchoolContext();
+  const { isWritable } = useSchoolWritable(activeSchool?.id);
 
-  const load = useCallback(async () => {
-    if (!activeSchool) { setLoading(false); return; }
-    setLoading(true);
-    const today = new Date().toISOString().slice(0, 10);
-    const [classResult, studentResult, staffResult, attendanceResult] = await Promise.all([
-      supabase.from("classes").select("id,name,section,class_teacher").eq("school_id", activeSchool.id).order("name").order("section"),
-      supabase.from("students").select("id,full_name,roll_no,class_id,status").eq("school_id", activeSchool.id).order("full_name"),
-      supabase.from("memberships").select("user_id,role").eq("school_id", activeSchool.id).in("role", ["teacher", "school_principal", "admissions_staff"]),
-      supabase.from("attendance_records").select("id", { count: "exact", head: true }).eq("school_id", activeSchool.id).eq("att_date", today),
-    ]);
-    const failed = [classResult.error, studentResult.error, staffResult.error, attendanceResult.error].find(Boolean);
-    if (failed) toast.error(`Unable to load school records: ${failed.message}`);
-    setClasses(classResult.data ?? []);
-    setStudents(studentResult.data ?? []);
-    setAttendanceToday(attendanceResult.count ?? 0);
-    const memberships = staffResult.data ?? [];
-    if (memberships.length) {
-      const profiles = await supabase.from("profiles").select("user_id,full_name").in("user_id", memberships.map((m) => m.user_id));
-      if (profiles.error) toast.error(`Unable to load staff profiles: ${profiles.error.message}`);
-      const names = new Map((profiles.data ?? []).map((p) => [p.user_id, p.full_name]));
-      setStaff(memberships.map((m) => ({ user_id: m.user_id, role: m.role, full_name: names.get(m.user_id) || "Profile name unavailable" })));
-    } else setStaff([]);
-    setLoading(false);
-  }, [activeSchool]);
+  const overviewQuery = useQuery<OverviewRow | null, Error>({
+    queryKey: ["principal-overview", activeSchool?.id],
+    enabled: !!activeSchool,
+    queryFn: async () => {
+      if (!activeSchool) return null;
+      const { data, error } = await supabase.rpc("principal_overview", {
+        _school_id: activeSchool.id,
+      });
+      if (error) throw error;
+      return (data?.[0] as OverviewRow | undefined) ?? null;
+    },
+  });
 
-  useEffect(() => { void load(); }, [load]);
+  const noticesQuery = useQuery<NoticePreview[], Error>({
+    queryKey: ["principal-recent-notices", activeSchool?.id],
+    enabled: !!activeSchool,
+    queryFn: async () => {
+      if (!activeSchool) return [];
+      const { data, error } = await supabase
+        .from("notices")
+        .select("id,title,audience,pinned,created_at")
+        .eq("school_id", activeSchool.id)
+        .order("pinned", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return (data ?? []) as NoticePreview[];
+    },
+  });
 
-  const createClass = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!activeSchool || activeRole !== "school_principal") return;
-    setSaving(true);
-    const { error } = await supabase.from("classes").insert({ school_id: activeSchool.id, name: className.trim(), section: section.trim().toUpperCase() });
-    setSaving(false);
-    if (error) { toast.error(`Unable to create class: ${error.message}`); return; }
-    setClassName(""); setSection("A"); toast.success("Class created"); await load();
-  };
+  if (!ready) {
+    return (
+      <AppShell title="Overview">
+        <div className="surface-panel h-40 animate-pulse" />
+      </AppShell>
+    );
+  }
+  if (accessError) {
+    return (
+      <AppShell title="Overview">
+        <Panel title="School access unavailable">{accessError}</Panel>
+      </AppShell>
+    );
+  }
+  if (!activeSchool) {
+    return (
+      <AppShell title="Overview">
+        <Panel title="No school assigned">
+          Ask your administrator to assign your principal membership to a school.
+        </Panel>
+      </AppShell>
+    );
+  }
 
-  const assignTeacher = async (classId: string, teacherId: string) => {
-    if (!activeSchool || activeRole !== "school_principal") return;
-    const { error } = await supabase.from("classes").update({ class_teacher: teacherId || null }).eq("id", classId).eq("school_id", activeSchool.id);
-    if (error) { toast.error(`Unable to update teacher assignment: ${error.message}`); return; }
-    toast.success("Teacher assignment updated");
-    await load();
-  };
+  const o = overviewQuery.data;
+  const loading = overviewQuery.isPending;
+  const pct =
+    o && o.attendance_today_marked > 0
+      ? Math.round((o.attendance_today_present / o.attendance_today_marked) * 100)
+      : null;
 
-  const enrollStudent = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!activeSchool || activeRole !== "school_principal" || !studentClass) return;
-    const { error } = await supabase.from("students").insert({ school_id: activeSchool.id, class_id: studentClass, full_name: studentName.trim(), roll_no: Number(studentRoll) });
-    if (error) { toast.error(`Unable to enroll student: ${error.message}`); return; }
-    setStudentName(""); setStudentRoll("1"); toast.success("Student enrolled"); await load();
-  };
-
-  if (!ready) return <AppShell title="Principal's Desk"><div className="surface-panel h-40 animate-pulse" /></AppShell>;
-  if (accessError) return <AppShell title="Principal's Desk"><Panel title="School access unavailable">{accessError}</Panel></AppShell>;
-  if (!activeSchool) return <AppShell title="Principal's Desk"><Panel title="No school assigned">Ask your administrator to assign your principal membership to a school.</Panel></AppShell>;
+  const attentionItems = o
+    ? [
+        {
+          count: o.classes_without_class_teacher,
+          label: "classes without a class teacher",
+          href: "/classes",
+        },
+        {
+          count: o.classes_without_timetable,
+          label: "classes without a timetable",
+          href: "/classes?tab=timetable",
+        },
+        {
+          count: o.exams_ready_to_publish,
+          label: "exams with marks ready to publish",
+          href: "/exams",
+        },
+        {
+          count: o.enquiries_followup_due,
+          label: "admission enquiries with follow-up due today or earlier",
+          href: "/admissions",
+        },
+      ].filter((item) => item.count > 0)
+    : [];
 
   return (
-    <AppShell title="Principal's Desk" subtitle={`${activeSchool.name} · School overview`}>
+    <AppShell
+      title="Overview"
+      subtitle={`${activeSchool.name} · ${activeSchool.academic_year}`}
+    >
       <div className="space-y-6">
-        <StatGrid items={[
-          ["Classes & sections", loading ? "…" : String(classes.length), "From this school"],
-          ["Students", loading ? "…" : String(students.length), "Current directory"],
-          ["Teachers", loading ? "…" : String(staff.filter((s) => s.role === "teacher").length), "School memberships"],
-          ["Attendance marked today", loading ? "…" : String(attendanceToday), "Records for today"],
-        ]} />
+        {overviewQuery.error && (
+          <div role="alert" className="surface-panel p-4 text-sm text-destructive">
+            Unable to load school summary: {overviewQuery.error.message}
+          </div>
+        )}
 
-        <Panel title="Classes and sections" subtitle="Class records are limited by this school’s database access policies." action={<span className="text-xs text-muted-foreground">{classes.length} total</span>}>
-          {activeRole === "school_principal" && <form onSubmit={createClass} className="mb-5 grid gap-2 sm:grid-cols-[1fr_140px_auto]">
-            <Input required maxLength={80} placeholder="Class or grade name" value={className} onChange={(e) => setClassName(e.target.value)} />
-            <Input required maxLength={20} aria-label="Section" placeholder="Section" value={section} onChange={(e) => setSection(e.target.value)} />
-            <Button disabled={saving}>{saving ? "Creating…" : "Add class"}</Button>
-          </form>}
-          {loading ? <p className="py-6 text-center text-sm text-muted-foreground">Loading classes…</p> : classes.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No classes are configured for this school yet.</p> : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{classes.map((c) => {
-            const classStudents = students.filter((s) => s.class_id === c.id);
-            const teacher = staff.find((p) => p.user_id === c.class_teacher);
-            return <article key={c.id} className="rounded-lg border border-border p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{c.name} · Section {c.section}</h3><p className="mt-1 text-xs text-muted-foreground">{teacher ? teacher.full_name : "Teacher not assigned"}</p></div><span className="rounded-full bg-secondary px-2 py-1 text-xs">{classStudents.length} students</span></div>{activeRole === "school_principal" && <label className="mt-3 block text-xs text-muted-foreground">Class teacher<select className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground" value={c.class_teacher ?? ""} onChange={(event) => void assignTeacher(c.id, event.target.value)}><option value="">Unassigned</option>{staff.filter((p) => p.role === "teacher").map((person) => <option key={person.user_id} value={person.user_id}>{person.full_name}</option>)}</select></label>}<ul className="mt-3 space-y-1 text-xs text-muted-foreground">{classStudents.slice(0, 4).map((student) => <li key={student.id}>{student.roll_no}. {student.full_name}</li>)}</ul>{classStudents.length > 4 && <p className="mt-1 text-xs text-muted-foreground">and {classStudents.length - 4} more students</p>}</article>;
-          })}</div>}
-        </Panel>
+        <StatGrid
+          items={[
+            ["Students", loading ? "…" : String(o?.student_count ?? 0), "Active enrolment"],
+            ["Classes", loading ? "…" : String(o?.class_count ?? 0), "Configured sections"],
+            ["Teachers", loading ? "…" : String(o?.teacher_count ?? 0), "Active memberships"],
+            [
+              "Attendance today",
+              loading
+                ? "…"
+                : o && o.attendance_today_marked > 0
+                  ? `${o.attendance_today_present} / ${o.attendance_today_marked} (${pct}%)`
+                  : "0 marked",
+              loading
+                ? ""
+                : `${o?.classes_without_attendance_today ?? 0} class(es) not marked today`,
+            ],
+          ]}
+        />
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <Panel title="Teacher and staff directory" subtitle="Active school memberships with profile names when available">
-            {loading ? <p className="py-5 text-sm text-muted-foreground">Loading directory…</p> : staff.length ? <ul className="divide-y divide-border">{staff.map((person) => <li key={person.user_id} className="flex justify-between gap-3 py-3"><span className="text-sm">{person.full_name}</span><span className="text-xs text-muted-foreground">{person.role.replaceAll("_", " ")}{classes.some((c) => c.class_teacher === person.user_id) ? ` · ${classes.filter((c) => c.class_teacher === person.user_id).map((c) => `${c.name}-${c.section}`).join(", ")}` : ""}</span></li>)}</ul> : <p className="py-6 text-sm text-muted-foreground">No teacher or staff memberships found for this school.</p>}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Panel
+            title="Needs attention"
+            subtitle="Operational items requiring leadership review"
+            action={
+              <Link href="/reports" className="text-xs font-medium text-primary hover:underline">
+                View reports →
+              </Link>
+            }
+          >
+            {loading ? (
+              <p className="py-4 text-sm text-muted-foreground">Checking school records…</p>
+            ) : attentionItems.length === 0 ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                <CalendarCheck className="h-4 w-4 text-emerald-600" />
+                Everything looks up to date across classes, timetables, exams, and enquiries.
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {attentionItems.map((item) => (
+                  <li key={item.label} className="flex items-center justify-between gap-3 py-3">
+                    <div className="flex items-center gap-2.5 text-sm">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                      <span>
+                        <strong className="tabular-nums">{item.count}</strong> {item.label}
+                      </span>
+                    </div>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={item.href}>
+                        Open <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Panel>
-          <Panel title="Student directory" subtitle="Students grouped by their current class">
-            {activeRole === "school_principal" && <form onSubmit={enrollStudent} className="mb-4 grid gap-2 sm:grid-cols-[1fr_100px_150px_auto]"><Input required maxLength={120} placeholder="Student full name" value={studentName} onChange={(event) => setStudentName(event.target.value)} /><Input required type="number" min="1" value={studentRoll} onChange={(event) => setStudentRoll(event.target.value)} aria-label="Roll number" /><select required className="h-10 rounded-md border border-input bg-background px-2 text-sm" value={studentClass} onChange={(event) => setStudentClass(event.target.value)} aria-label="Enroll in class"><option value="">Select class</option>{classes.map((cls) => <option key={cls.id} value={cls.id}>{cls.name} · {cls.section}</option>)}</select><Button disabled={!classes.length}>Enroll</Button></form>}
-            {loading ? <p className="py-5 text-sm text-muted-foreground">Loading students…</p> : students.length ? <ul className="max-h-[420px] divide-y divide-border overflow-y-auto">{students.map((student) => <li key={student.id} className="flex justify-between gap-3 py-3"><span className="text-sm">{student.full_name}<span className="ml-2 text-xs text-muted-foreground">#{student.roll_no}</span></span><span className="text-xs text-muted-foreground">{classes.find((c) => c.id === student.class_id)?.name ?? "Class unavailable"} · {classes.find((c) => c.id === student.class_id)?.section ?? ""}</span></li>)}</ul> : <p className="py-6 text-sm text-muted-foreground">No students enrolled yet.</p>}
+
+          <Panel
+            title="Recent notices"
+            subtitle={loading ? "" : `${o?.notices_last_7_days ?? 0} posted in the last 7 days`}
+            action={
+              <Link href="/notices" className="text-xs font-medium text-primary hover:underline">
+                Manage notices →
+              </Link>
+            }
+          >
+            {noticesQuery.isPending ? (
+              <p className="py-4 text-sm text-muted-foreground">Loading notices…</p>
+            ) : noticesQuery.error ? (
+              <p className="py-4 text-sm text-destructive">{noticesQuery.error.message}</p>
+            ) : (noticesQuery.data?.length ?? 0) === 0 ? (
+              <p className="py-4 text-sm text-muted-foreground">No notices posted yet.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {noticesQuery.data!.map((n) => (
+                  <li key={n.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {n.pinned ? "📌 " : ""}
+                        {n.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(n.created_at).toLocaleDateString("en-IN")}
+                      </p>
+                    </div>
+                    <Pill tone="muted">{n.audience}</Pill>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Panel>
         </div>
-        <PrincipalTasks />
-        <p className="text-xs text-muted-foreground">Timetable, subjects, admissions, examinations, homework, announcements, finance and reports are not connected to live school tables in this project yet.</p>
+
+        <Panel title="Quick actions" subtitle="Jump directly to core school workflows">
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/students">
+                <GraduationCap className="mr-1.5 h-4 w-4" /> Students
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/students/promote">
+                <Users className="mr-1.5 h-4 w-4" /> Promote class
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/attendance">
+                <CalendarCheck className="mr-1.5 h-4 w-4" /> Attendance
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/notices">
+                <Megaphone className="mr-1.5 h-4 w-4" /> Notices
+              </Link>
+            </Button>
+          </div>
+        </Panel>
+
+        <PrincipalTasks schoolId={activeSchool.id} isWritable={isWritable} />
       </div>
     </AppShell>
   );

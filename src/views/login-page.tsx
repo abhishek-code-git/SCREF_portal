@@ -80,6 +80,7 @@ export function LoginPage() {
       else if (memberships?.some((membership) => membership.role === "central_super_admin" || membership.role === "central_ops_admin")) router.replace("/dashboard");
       else if (memberships?.some((membership) => membership.role === "franchise_owner" && membership.master_franchise_id)) router.replace("/master/dashboard");
       else if (memberships?.some((membership) => membership.role === "franchise_owner")) router.replace("/franchise/dashboard");
+      else if (memberships?.some((membership) => membership.role === "school_principal")) router.replace("/principal");
       else if (memberships?.some((membership) => membership.role === "teacher")) router.replace("/teacher");
       else if (memberships?.some((membership) => membership.role === "student")) router.replace("/student");
       else router.replace("/dashboard");

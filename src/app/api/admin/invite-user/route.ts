@@ -51,6 +51,8 @@ export async function POST(request: Request) {
     if (school.status !== "active" || !open) return fail("Invitations are available only for schools in an active franchise and master franchise.", 403);
   } else if (!callerIsCentral && principalSchoolIds.length > 0) {
     if (payload.scope_kind !== "school" || !payload.scope_id || !staffRoles.includes(payload.role as typeof staffRoles[number]) || !principalSchoolIds.includes(payload.scope_id)) return fail("Principals may invite school staff only to their own school.", 403);
+    const { data: writable } = await caller.supabase.rpc("school_is_writable", { _school_id: payload.scope_id });
+    if (!writable) return fail("Invitations are disabled while this school or its franchise is suspended or inactive.", 403);
   } else if (!callerIsCentral) {
     const allowedKind = (payload.role === "franchise_owner" && payload.scope_kind === "franchise")
       || (payload.role === "school_principal" && payload.scope_kind === "school");

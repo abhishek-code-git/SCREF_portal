@@ -2,21 +2,21 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
-  Bus,
+  BookOpen,
+  Calendar,
   ChevronLeft,
   ClipboardCheck,
   ClipboardList,
   ShieldAlert,
   GraduationCap,
-  IndianRupee,
   LayoutDashboard,
   LifeBuoy,
   LogOut,
   Megaphone,
   Menu,
   Network,
+  PenLine,
   PieChart,
-  Search,
   Settings,
   UserCircle2,
   UserCog,
@@ -25,6 +25,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { BrandLockup } from "@/components/brand";
+import { ReadOnlyBanner } from "@/components/kit";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,53 +38,42 @@ import {
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { DEMO_MODE } from "@/lib/demo-mode";
-import { ROLE_LABELS, canOpen, homeFor, isCentralRole, membershipRoleLabel, useSchoolContext } from "@/hooks/use-school";
+import {
+  LEADERSHIP,
+  ROLE_LABELS,
+  canOpen,
+  homeFor,
+  isCentralRole,
+  membershipRoleLabel,
+  useSchoolContext,
+  useSchoolWritable,
+} from "@/hooks/use-school";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { supabase } from "@/integrations/supabase/client";
 
 type NavLeaf = { label: string; to?: string; icon: React.ElementType; soon?: boolean };
 type NavGroup = { group: string; items: NavLeaf[] };
 
-const nav: NavGroup[] = [
+const schoolNav: NavGroup[] = [
   {
-    group: "Overview",
+    group: "School",
     items: [
-      { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-      { label: "Principal's Desk", to: "/principal", icon: UserCog },
-      { label: "Teacher's Desk", to: "/teacher", icon: ClipboardCheck },
-    ],
-  },
-  {
-    group: "Management",
-    items: [
+      { label: "Overview", to: "/principal", icon: LayoutDashboard },
+      { label: "Classes & Timetable", to: "/classes", icon: Calendar },
       { label: "Students", to: "/students", icon: GraduationCap },
-      { label: "Parents", to: "/parents", icon: UserCircle2 },
-      { label: "Staff", to: "/staff", icon: UserCog },
+      { label: "Teachers & Staff", to: "/staff", icon: UserCog },
+      { label: "Attendance", to: "/attendance", icon: ClipboardCheck },
+      { label: "Exams & Results", to: "/exams", icon: PenLine },
+      { label: "Notices", to: "/notices", icon: Megaphone },
       { label: "Admissions", to: "/admissions", icon: Network },
-    ],
-  },
-  {
-    group: "Operations",
-    items: [
-      { label: "Attendance", to: "/attendance", icon: Users },
-      { label: "Finance", to: "/finance", icon: IndianRupee },
-      { label: "Transport", to: "/transport", icon: Bus },
-      { label: "Communication", to: "/communication", icon: Megaphone },
-    ],
-  },
-  {
-    group: "Academics & Portals",
-    items: [{ label: "Academic Management", to: "/academics", icon: GraduationCap }],
-  },
-  {
-    group: "More",
-    items: [
-      { label: "Reports & Insights", to: "/reports", icon: PieChart },
-      { label: "Support", to: "/support", icon: LifeBuoy },
+      { label: "Reports", to: "/reports", icon: PieChart },
       { label: "Settings", to: "/settings", icon: Settings },
+      { label: "Support", to: "/support", icon: LifeBuoy },
     ],
   },
 ];
+
+const nav: NavGroup[] = schoolNav;
 
 const centralNav: NavGroup[] = [
   {
@@ -109,14 +99,16 @@ const centralNav: NavGroup[] = [
 
 const franchiseNav: NavGroup[] = [
   {
-    group: "Franchise Network",
+    group: "Franchise",
     items: [
-      { label: "Franchise Dashboard", to: "/franchise/dashboard", icon: LayoutDashboard },
-      { label: "Schools", to: "/franchise/schools", icon: GraduationCap },
+      { label: "Overview", to: "/franchise/dashboard", icon: LayoutDashboard },
+      { label: "My Schools", to: "/franchise/schools", icon: GraduationCap },
       { label: "Team", to: "/franchise/team", icon: Users },
+      { label: "Reports", to: "/franchise/reports", icon: PieChart },
+      { label: "Support", to: "/support", icon: LifeBuoy },
+      { label: "Settings", to: "/franchise/settings", icon: Settings },
     ],
   },
-  ...nav,
 ];
 
 const masterNav: NavGroup[] = [
@@ -128,38 +120,86 @@ const masterNav: NavGroup[] = [
   ] },
 ];
 
+const teacherNav: NavGroup[] = [
+  {
+    group: "Teaching",
+    items: [
+      { label: "Today", to: "/teacher", icon: LayoutDashboard },
+      { label: "My Classes", to: "/teacher/classes", icon: Users },
+      { label: "Timetable", to: "/teacher/timetable", icon: Calendar },
+      { label: "Attendance", to: "/teacher/attendance", icon: ClipboardCheck },
+      { label: "Homework", to: "/teacher/homework", icon: BookOpen },
+      { label: "Marks", to: "/teacher/marks", icon: PenLine },
+      { label: "Notices", to: "/teacher/notices", icon: Megaphone },
+    ],
+  },
+  {
+    group: "More",
+    items: [
+      { label: "Support", to: "/support", icon: LifeBuoy },
+      { label: "Settings", to: "/settings", icon: Settings },
+    ],
+  },
+];
+
 const studentNav: NavGroup[] = [
-  { group: "Student portal", items: [{ label: "My school", to: "/student", icon: GraduationCap }, ...nav.flatMap((group) => group.items.filter((item) => item.to === "/support" || item.to === "/settings"))] },
+  {
+    group: "Student portal",
+    items: [
+      { label: "My school", to: "/student", icon: GraduationCap },
+      { label: "Support", to: "/support", icon: LifeBuoy },
+      { label: "Settings", to: "/settings", icon: Settings },
+    ],
+  },
 ];
 
 const mobileNav = [
-  { label: "Home", to: "/dashboard", icon: LayoutDashboard },
-  { label: "Finance", to: "/finance", icon: IndianRupee },
-  { label: "Attendance", to: "/attendance", icon: Users },
+  { label: "Overview", to: "/principal", icon: LayoutDashboard },
+  { label: "Students", to: "/students", icon: GraduationCap },
+  { label: "Attendance", to: "/attendance", icon: ClipboardCheck },
   { label: "Reports", to: "/reports", icon: PieChart },
 ] as const;
 
-const sampleDataRoutes = new Set([
-  "/students", "/parents", "/staff", "/admissions", "/attendance",
-  "/finance", "/communication", "/reports", "/settings",
-]);
+const schoolRoutePrefixes = [
+  "/principal",
+  "/classes",
+  "/students",
+  "/staff",
+  "/attendance",
+  "/exams",
+  "/notices",
+  "/admissions",
+  "/reports",
+  "/settings",
+  "/support",
+];
+
+const sampleDataRoutes = new Set(["/parents", "/finance", "/communication"]);
 
 function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (() => void) | undefined }) {
   const pathname = usePathname();
-  const { activeRole, memberships, masterMemberships, activeMasterFranchiseId } = useSchoolContext();
+  const { activeRole, activeSchool, memberships, masterMemberships, activeMasterFranchiseId } = useSchoolContext();
   const isMasterRoute = pathname === "/master" || pathname.startsWith("/master/");
+  const isSchoolRoute = schoolRoutePrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const hasFranchiseScope = memberships.some((membership) => membership.role === "franchise_owner" && !!membership.franchise_id);
   const masterMembership = masterMemberships.find((membership) => membership.master_franchise_id === activeMasterFranchiseId);
   const routeRole = isCentralRole(activeRole)
     ? activeRole
-    : (pathname.startsWith("/franchise/") && memberships.some((membership) => membership.role === "franchise_owner")) || (isMasterRoute && masterMembership)
+    : ((pathname.startsWith("/franchise/") && memberships.some((membership) => membership.role === "franchise_owner")) || (isMasterRoute && masterMembership) || (hasFranchiseScope && isSchoolRoute && activeSchool && !activeRole))
       ? "franchise_owner"
       : activeRole;
   const sourceNav = isCentralRole(routeRole)
-    ? centralNav
+    ? (isSchoolRoute && activeSchool
+        ? [{ group: "Central", items: [{ label: "Network Overview", to: "/dashboard", icon: LayoutDashboard }] }, ...schoolNav]
+        : centralNav)
     : isMasterRoute && masterMembership
       ? masterNav
     : routeRole === "franchise_owner"
-      ? franchiseNav
+      ? (isSchoolRoute && activeSchool && !pathname.startsWith("/franchise/")
+          ? [{ group: "Franchise", items: [{ label: "Back to franchise", to: "/franchise/dashboard", icon: Network }] }, ...schoolNav]
+          : franchiseNav)
+      : routeRole === "teacher"
+        ? teacherNav
       : routeRole === "student"
         ? studentNav
       : nav;
@@ -274,13 +314,13 @@ function SidebarInner({
 }
 
 function SidebarCentreCard({ collapsed }: { collapsed: boolean }) {
-  const { activeSchool, activeMasterFranchise } = useSchoolContext();
+  const { activeSchool, activeMasterFranchise, activeFranchise } = useSchoolContext();
   const pathname = usePathname();
   const isFranchiseWorkspace = pathname.startsWith("/franchise/");
   const isMasterWorkspace = pathname.startsWith("/master/");
-  const code = isMasterWorkspace ? "MASTER NETWORK" : isFranchiseWorkspace ? "NETWORK" : activeSchool?.code ?? "CENTRAL";
-  const name = isMasterWorkspace ? activeMasterFranchise?.name ?? "Master franchise" : isFranchiseWorkspace ? "Assigned school network" : activeSchool?.name ?? "Central workspace";
-  const city = isMasterWorkspace || isFranchiseWorkspace ? "" : activeSchool?.city ?? "";
+  const code = isMasterWorkspace ? "MASTER NETWORK" : isFranchiseWorkspace ? (activeFranchise?.code ?? "FRANCHISE") : activeSchool?.code ?? "CENTRAL";
+  const name = isMasterWorkspace ? activeMasterFranchise?.name ?? "Master franchise" : isFranchiseWorkspace ? (activeFranchise?.name ?? "Franchise") : activeSchool?.name ?? "Central workspace";
+  const city = isMasterWorkspace ? "" : isFranchiseWorkspace ? (activeFranchise?.city ?? "") : activeSchool?.city ?? "";
   return (
     <div
       className={cn(
@@ -319,13 +359,21 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const { user, profile, ready: profileReady, error: profileError } = useWorkspace();
-  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, workspaceSchools, setActiveSchool, activeMembership, setActiveMembership, masterMemberships, masterFranchises, activeMasterFranchise, activeMasterFranchiseId, setActiveMasterFranchise } = useSchoolContext();
+  const { ready: schoolReady, error: schoolError, activeRole, activeSchool, memberships, schools, workspaceSchools, setActiveSchool, activeMembership, setActiveMembership, masterMemberships, masterFranchises, activeMasterFranchise, activeMasterFranchiseId, setActiveMasterFranchise, myFranchises, activeFranchise, activeFranchiseId, setActiveFranchise } = useSchoolContext();
+  const { isWritable, writableLoading } = useSchoolWritable(activeSchool?.id);
   const pathname = usePathname();
+  const isFranchiseRoute = pathname.startsWith("/franchise/");
   const isFranchiseDashboard = pathname === "/franchise/dashboard";
   const isMasterRoute = pathname === "/master" || pathname.startsWith("/master/");
+  const isSchoolRoute = schoolRoutePrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const hasFranchiseScope = memberships.some((membership) => membership.role === "franchise_owner" && !!membership.franchise_id);
   const centralMembership = memberships.find((membership) => isCentralRole(membership.role));
   const routeMasterMembership = masterMemberships.find((membership) => membership.master_franchise_id === activeMasterFranchiseId);
+  const isLeadershipUser = !!activeRole && LEADERSHIP.includes(activeRole);
+  const schoolReadOnly = !!activeSchool && !isCentralRole(activeRole) && (
+    ["inactive", "suspended", "disabled", "archived"].includes(activeSchool.status.toLowerCase()) ||
+    (!writableLoading && !isWritable)
+  );
   useEffect(() => {
     if (profileReady && !user) router.replace(`/login?next=${encodeURIComponent(pathname)}`);
   }, [profileReady, user, pathname, router]);
@@ -351,19 +399,21 @@ export function AppShell({
   if (memberships.length === 0) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">No workspace access</h1><p className="text-sm text-muted-foreground">Your account has no active school membership. Ask your school administrator to invite or assign this account, then sign in again.</p><Button onClick={handleLogout}>Sign out</Button></div></div>;
   }
-  if (memberships.length > 1 && !activeMembership && !(hasFranchiseScope && activeSchool) && !isFranchiseDashboard && !(isMasterRoute && (routeMasterMembership || centralMembership))) {
+  if (memberships.length > 1 && !activeMembership && !(hasFranchiseScope && activeSchool) && !isFranchiseRoute && !(isMasterRoute && (routeMasterMembership || centralMembership))) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel w-full max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Choose your workspace</h1><p className="text-sm text-muted-foreground">This account has access to more than one workspace. Select the one you want to open.</p>{memberships.map((membership) => { const school = schools.find((item) => item.id === membership.school_id); return <Button key={membership.id} variant="outline" className="w-full justify-between" onClick={() => setActiveMembership(membership.id)}>{school?.name ?? "Network workspace"}<span className="text-muted-foreground">{membershipRoleLabel(membership) ?? ROLE_LABELS[membership.role]}</span></Button>; })}</div></div>;
   }
-  if (!isFranchiseDashboard && activeSchool && ["inactive", "suspended", "disabled", "archived"].includes(activeSchool.status.toLowerCase())) {
+  if (!isFranchiseRoute && !isLeadershipUser && activeSchool && ["inactive", "suspended", "disabled", "archived"].includes(activeSchool.status.toLowerCase())) {
     return <div className="flex min-h-screen items-center justify-center bg-background px-5"><div className="surface-panel max-w-lg space-y-3 p-7"><h1 className="font-display text-xl font-semibold">Workspace is inactive</h1><p className="text-sm text-muted-foreground">This school workspace is currently inactive. Contact your school administrator for access.</p><Button onClick={handleLogout}>Sign out</Button></div></div>;
   }
   const routeRole = isMasterRoute && centralMembership
     ? centralMembership.role
     : isMasterRoute && routeMasterMembership
       ? "franchise_owner"
-      : isFranchiseDashboard && memberships.some((membership) => membership.role === "franchise_owner")
-    ? "franchise_owner"
-    : activeRole;
+      : isFranchiseRoute && memberships.some((membership) => membership.role === "franchise_owner" || isCentralRole(membership.role))
+    ? (memberships.find((m) => isCentralRole(m.role))?.role ?? "franchise_owner")
+    : hasFranchiseScope && isSchoolRoute && activeSchool && !activeRole
+      ? "franchise_owner"
+      : activeRole;
   const routeMembership = isMasterRoute && centralMembership ? centralMembership : isMasterRoute ? routeMasterMembership : activeMembership;
   const allowed = canOpen(routeRole, pathname, routeMembership);
   if (!allowed) {
@@ -377,7 +427,7 @@ export function AppShell({
       : isMasterRoute && (routeMasterMembership || centralMembership)
       ? [{ label: "Overview", to: "/master/dashboard", icon: LayoutDashboard }, { label: "Franchises", to: "/master/franchises", icon: Network }, { label: "Schools", to: "/master/schools", icon: GraduationCap }, { label: "Team", to: "/master/team", icon: Users }]
       : routeRole === "franchise_owner"
-      ? [{ label: "Network", to: "/franchise/dashboard", icon: LayoutDashboard }, ...mobileNav.filter((i) => canOpen(routeRole, i.to))]
+      ? [{ label: "Overview", to: "/franchise/dashboard", icon: LayoutDashboard }, { label: "Schools", to: "/franchise/schools", icon: GraduationCap }, { label: "Team", to: "/franchise/team", icon: Users }, { label: "Reports", to: "/franchise/reports", icon: PieChart }]
       : routeRole === "student"
         ? [{ label: "My school", to: "/student", icon: GraduationCap }, ...mobileNav.filter((i) => canOpen(routeRole, i.to))]
         : mobileNav.filter((i) => canOpen(routeRole, i.to));
@@ -400,7 +450,7 @@ export function AppShell({
     <div className="flex min-h-screen w-full bg-background">
       <aside
         className={cn(
-          "sticky top-0 hidden h-screen shrink-0 border-r border-sidebar-border transition-[width] duration-200 lg:block",
+          "print:hidden sticky top-0 hidden h-screen shrink-0 border-r border-sidebar-border transition-[width] duration-200 lg:block",
           collapsed ? "w-[76px]" : "w-[264px]",
         )}
       >
@@ -408,7 +458,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 border-b border-border bg-card/85 backdrop-blur">
+        <header className="print:hidden sticky top-0 z-30 border-b border-border bg-card/85 backdrop-blur">
           <div className="flex items-center gap-3 px-4 py-3 sm:px-6">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger asChild>
@@ -429,19 +479,12 @@ export function AppShell({
               )}
             </div>
 
-            <div className="hidden items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground md:flex">
-              <Search className="h-4 w-4" />
-              <input
-                placeholder="Search students, staff, invoices…"
-                className="w-56 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-
             {pathname.startsWith("/admin/master-franchises/") && <Button asChild size="sm" variant="outline"><Link href={`/master/dashboard?masterFranchiseId=${pathname.split("/").filter(Boolean).pop()}`}>View as master</Link></Button>}
             {actions}
 
             {isMasterRoute && masterMemberships.length > 1 && <select aria-label="Master franchise" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeMasterFranchiseId ?? ""} onChange={(event) => { setActiveMasterFranchise(event.target.value); router.replace(`/master/dashboard?masterFranchiseId=${event.target.value}`); }}><option value="" disabled>Select network</option>{masterFranchises.map((master) => <option key={master.id} value={master.id}>{master.name}</option>)}</select>}
-            {hasFranchiseScope && !isMasterRoute && workspaceSchools.length > 0 && <select aria-label="School workspace" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeSchool?.id ?? ""} onChange={(event) => setActiveSchool(event.target.value)}><option value="">Select school</option>{workspaceSchools.map((school) => <option key={school.id} value={school.id}>{school.name}</option>)}</select>}
+            {isFranchiseRoute && myFranchises.length > 1 && <select aria-label="Franchise" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeFranchiseId ?? ""} onChange={(event) => { setActiveFranchise(event.target.value); router.replace("/franchise/dashboard"); }}><option value="" disabled>Select franchise</option>{myFranchises.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select>}
+            {!isMasterRoute && !isFranchiseRoute && (workspaceSchools.length > 1 || (hasFranchiseScope && workspaceSchools.length > 0)) && <select aria-label="School workspace" className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-xs sm:max-w-56 sm:text-sm" value={activeSchool?.id ?? ""} onChange={(event) => setActiveSchool(event.target.value)}><option value="">Select school</option>{workspaceSchools.map((school) => <option key={school.id} value={school.id}>{school.name}</option>)}</select>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -496,6 +539,7 @@ export function AppShell({
         </header>
 
         <main className="flex-1 px-4 pb-24 pt-6 sm:px-6 lg:pb-10">
+          {schoolReadOnly && isSchoolRoute && !isFranchiseRoute && <div className="mb-5"><ReadOnlyBanner visible /></div>}
           {DEMO_MODE && sampleDataRoutes.has(pathname) && <div role="status" className="mb-5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-medium">Demo mode: the records on this page are illustrative sample data, not your school’s live records.</div>}
           {allowed ? (
             children
@@ -514,11 +558,11 @@ export function AppShell({
         </main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-border bg-card/95 backdrop-blur lg:hidden">
+      <nav className="print:hidden fixed inset-x-0 bottom-0 z-30 flex border-t border-border bg-card/95 backdrop-blur lg:hidden">
         {(isCentralRole(routeRole)
           ? mobileItems
           : routeRole === "teacher"
-          ? [{ label: "My Classes", to: "/teacher" as const, icon: ClipboardCheck }, ...mobileItems]
+          ? [{ label: "Today", to: "/teacher" as const, icon: LayoutDashboard }, { label: "Classes", to: "/teacher/classes" as const, icon: Users }, { label: "Attendance", to: "/teacher/attendance" as const, icon: ClipboardCheck }, { label: "Homework", to: "/teacher/homework" as const, icon: BookOpen }]
           : mobileItems
         ).map((item) => {
           const Icon = item.icon;

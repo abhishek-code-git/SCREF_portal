@@ -1,181 +1,278 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSearchParams } from "next/navigation";
-import { toast } from "sonner";
-import { AlertCircle, ArrowUpRight, Building2, ClipboardCheck, GraduationCap, Users } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowUpRight,
+  Building2,
+  ClipboardCheck,
+  GraduationCap,
+  Rocket,
+  Users,
+} from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { ReadOnlyBanner, StatGrid, Panel, Pill } from "@/components/kit";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { useFranchiseScope } from "@/hooks/use-franchise";
 import { useSchoolContext } from "@/hooks/use-school";
 import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 
-type SchoolMetric = {
-  school_id: string; school_code: string; school_name: string; city: string; state: string;
-  address: string; academic_year: string; school_status: string; school_created_at: string;
-  student_count: number; teacher_count: number; principal_count: number; class_count: number;
-  principal_names: string | null;
-  attendance_today_count: number; attendance_today_present: number;
-  network_teacher_count: number; network_principal_count: number;
+type NeedsAttention = {
+  kind: string;
+  school_id: string;
+  school_name: string;
+  detail: string;
+  since: string;
+};
+type Comparison = {
+  school_id: string;
+  name: string;
+  code: string;
+  status: string;
+  student_count: number;
+  teacher_count: number;
+  has_principal: boolean;
+  attendance_pct_30d: number | null;
+  classes_without_attendance_today: number;
+  open_enquiries: number;
+  admitted_30d: number;
+  last_activity_at: string | null;
+};
+type Activity = {
+  id: string;
+  actor_name: string;
+  what: string;
+  occurred_at: string;
+  school_name: string;
 };
 
-const count = (value: number) => value.toLocaleString("en-IN");
-const statusLabel = (value: string) => {
-  const status = value.toLowerCase();
-  if (["onboarding", "pending"].includes(status)) return "Pending";
-  if (["suspended", "inactive", "disabled", "archived"].includes(status)) return "Inactive";
-  return value.charAt(0).toUpperCase() + value.slice(1);
-};
-const dashboardErrorText = (message: string) => /does not exist|schema cache|could not find/i.test(message)
-  ? `${message} Apply the network foundation and read-model migrations in timestamp order, then reload.`
-  : message;
+const n = (v: number | null | undefined) => (v ?? 0).toLocaleString("en-IN");
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${v}%`);
 
 export function FranchiseDashboard() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const masterFranchiseId = searchParams.get("masterFranchiseId");
-  const franchiseId = searchParams.get("franchiseId");
-  const { memberships, setActiveMembership } = useSchoolContext();
-  const [schools, setSchools] = useState<SchoolMetric[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [inviteSchool, setInviteSchool] = useState<SchoolMetric | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
-  const assignedMemberships = useMemo(
-    () => memberships.filter((membership) => membership.role === "franchise_owner" && membership.school_id),
-    [memberships],
-  );
-  const membershipBySchool = useMemo(
-    () => new Map(assignedMemberships.map((membership) => [membership.school_id!, membership.id])),
-    [assignedMemberships],
-  );
+  const ctx = useFranchiseScope();
+  const { setActiveMembership, setActiveSchool, memberships } = useSchoolContext();
+  const { franchiseId, scope, overview, readOnly, preview, loading, error } = ctx;
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void (async () => {
-      try {
-        const { data, error: queryError } = await supabase.rpc("franchise_network_dashboard", {
-          _master_franchise_id: masterFranchiseId,
-          _franchise_id: franchiseId,
-        });
-        if (cancelled) return;
-        if (queryError) {
-          setError(dashboardErrorText(queryError.message));
-          setSchools([]);
-        } else {
-          setSchools((data ?? []) as SchoolMetric[]);
-        }
-      } catch (cause) {
-        if (cancelled) return;
-        setError(cause instanceof Error ? cause.message : "Unable to load your assigned school network.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [reloadToken, masterFranchiseId, franchiseId]);
+  const comparisonQuery = useQuery<Comparison[], Error>({
+    queryKey: ["franchise-school-comparison", franchiseId],
+    enabled: !!franchiseId,
+    queryFn: async () => {
+      const { data, error: e } = await supabase.rpc("franchise_school_comparison", { _franchise_id: franchiseId });
+      if (e) throw e;
+      return (data ?? []) as Comparison[];
+    },
+  });
 
-  const totalStudents = useMemo(
-    () => schools.reduce((total, school) => total + school.student_count, 0),
-    [schools],
-  );
-  const totalTeachers = schools[0]?.network_teacher_count ?? 0;
-  const totalPrincipals = schools[0]?.network_principal_count ?? 0;
-  const scopedView = !!masterFranchiseId || !!franchiseId;
-  const active = schools.filter((school) => school.school_status.toLowerCase() === "active").length;
-  const pending = schools.filter((school) => ["onboarding", "pending"].includes(school.school_status.toLowerCase())).length;
-  const inactive = schools.filter((school) => ["suspended", "inactive", "disabled", "archived"].includes(school.school_status.toLowerCase())).length;
+  const attentionQuery = useQuery<NeedsAttention[], Error>({
+    queryKey: ["franchise-needs-attention", franchiseId],
+    enabled: !!franchiseId,
+    queryFn: async () => {
+      const { data, error: e } = await supabase.rpc("franchise_needs_attention", { _franchise_id: franchiseId });
+      if (e) throw e;
+      return (data ?? []) as NeedsAttention[];
+    },
+  });
+
+  const activityQuery = useQuery<Activity[], Error>({
+    queryKey: ["franchise-activity-feed", franchiseId],
+    enabled: !!franchiseId,
+    queryFn: async () => {
+      const { data, error: e } = await supabase.rpc("franchise_activity_feed", { _franchise_id: franchiseId, _limit: 15 });
+      if (e) throw e;
+      return (data ?? []) as Activity[];
+    },
+  });
+
+  const comparison = useMemo(() => comparisonQuery.data ?? [], [comparisonQuery.data]);
+  const attention = useMemo(() => attentionQuery.data ?? [], [attentionQuery.data]);
+  const activity = useMemo(() => activityQuery.data ?? [], [activityQuery.data]);
+
+  const [sortKey, setSortKey] = useState<"name" | "students" | "attendance">("name");
+  const sorted = useMemo(() => {
+    const rows = [...comparison];
+    if (sortKey === "students") rows.sort((a, b) => b.student_count - a.student_count);
+    else if (sortKey === "attendance") rows.sort((a, b) => (b.attendance_pct_30d ?? -1) - (a.attendance_pct_30d ?? -1));
+    else rows.sort((a, b) => a.name.localeCompare(b.name));
+    return rows;
+  }, [comparison, sortKey]);
 
   const openSchool = (schoolId: string) => {
-    const membershipId = membershipBySchool.get(schoolId);
-    if (!membershipId) return;
-    setActiveMembership(membershipId);
-    router.push("/dashboard");
+    const m = memberships.find((membership) => membership.role === "franchise_owner" && membership.school_id === schoolId);
+    if (m) setActiveMembership(m.id);
+    setActiveSchool(schoolId);
+    router.push("/principal");
   };
 
-  const createPrincipalInvite = async () => {
-    if (!inviteSchool || !inviteEmail.trim()) return;
-    const normalizedEmail = inviteEmail.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      toast.error("Enter a valid email address.");
-      return;
-    }
-    setInviteLoading(true);
-    try {
-      const { error: inviteError } = await supabase.from("staff_invites").insert({
-        school_id: inviteSchool.school_id,
-        email: normalizedEmail,
-        role: "school_principal",
-      });
-      if (inviteError) {
-        toast.error("Could not prepare principal access: " + inviteError.message);
-        return;
-      }
-      toast.success("Principal signup access was prepared for " + inviteSchool.school_name);
-      setInviteSchool(null);
-      setInviteEmail("");
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Unable to save this principal invite.");
-    } finally {
-      setInviteLoading(false);
-    }
-  };
+  const subtitle = scope
+    ? `${scope.name}${scope.status !== "active" ? ` · ${scope.status}` : ""}${scope.master_status !== "active" ? ` · Master: ${scope.master_status}` : ""}`
+    : "Franchise";
+
+  if (!franchiseId && !loading) {
+    return (
+      <AppShell title="Franchise Dashboard" subtitle="No franchise selected">
+        <div className="surface-panel flex flex-col items-center px-6 py-12 text-center">
+          <AlertCircle className="h-8 w-8 text-muted-foreground" />
+          <p className="mt-4 font-display text-base font-semibold">No franchise selected</p>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">Your account does not have a franchise membership, or no franchise is selected. Contact your administrator.</p>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
-    <AppShell title="Franchise Dashboard" subtitle={scopedView ? "Authorized network scope" : "Your database-assigned school network"}>
+    <AppShell title="Franchise Overview" subtitle={subtitle}>
       <div className="space-y-6">
-        {error && <div role="alert" className="surface-panel flex flex-wrap items-center gap-3 border-destructive/30 p-4 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /><div className="min-w-0 flex-1"><p className="font-medium">Network data could not be loaded</p><p className="mt-1 break-words text-muted-foreground">{error}</p></div><Button variant="outline" size="sm" onClick={() => setReloadToken((token) => token + 1)}>Retry</Button></div>}
-        {!loading && !error && schools.length === 0 && <section className="surface-panel space-y-3 p-6"><h2 className="font-display text-lg font-semibold">No schools are linked to this network yet</h2><p className="text-sm text-muted-foreground">A Central Admin can link existing schools to franchises. This dashboard only shows schools in the authorized network scope.</p></section>}
+        {readOnly && <ReadOnlyBanner visible />}
+        {preview && (
+          <div role="status" className="rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm font-medium">
+            Preview mode — you are viewing this franchise as {ctx.central ? "Central Admin" : "Master Owner"}. Data is read-only.
+          </div>
+        )}
 
-        <section aria-label="Assigned network metrics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          {[
-            { label: "Assigned schools", value: loading || error ? "—" : count(schools.length), icon: Building2 },
-            { label: "Active schools", value: loading || error ? "—" : count(active), icon: ClipboardCheck },
-            { label: "Pending schools", value: loading || error ? "—" : count(pending), icon: AlertCircle },
-            { label: "Students", value: loading || error ? "—" : count(totalStudents), icon: GraduationCap },
-            { label: "Teachers · Principals", value: loading || error ? "—" : count(totalTeachers) + " · " + count(totalPrincipals), icon: Users },
-          ].map((metric) => { const Icon = metric.icon; return <article key={metric.label} className="surface-panel p-5"><div className="flex items-center justify-between"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{metric.label}</p><Icon className="h-4 w-4 text-muted-foreground" /></div><p className="mt-3 font-display text-2xl font-semibold tabular-nums">{metric.value}</p></article>; })}
-        </section>
+        {error && (
+          <div role="alert" className="surface-panel flex flex-wrap items-center gap-3 border-destructive/30 p-4 text-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Could not load franchise data</p>
+              <p className="mt-1 break-words text-muted-foreground">{error}</p>
+            </div>
+          </div>
+        )}
 
-        <section id="schools" className="surface-panel overflow-hidden">
-          <div className="border-b border-border px-5 py-4"><h2 className="font-display font-semibold">Authorized schools</h2><p className="mt-1 text-xs text-muted-foreground">Access comes from your franchise owner school memberships.</p></div>
-          {loading ? <p className="p-5 text-sm text-muted-foreground">Loading assigned school records…</p> : error ? null : schools.length === 0 ? <p className="p-5 text-sm text-muted-foreground">No authorized school records were returned.</p> : (
-            <div className="divide-y divide-border">{schools.map((school) => {
-              const attendance = school.attendance_today_count ? Math.round((school.attendance_today_present / school.attendance_today_count) * 100) : null;
-              return <article key={school.school_id} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(220px,1.5fr)_repeat(4,minmax(90px,0.7fr))_auto] lg:items-center">
-                <div className="min-w-0"><p className="truncate font-medium">{school.school_name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{school.school_code} · {[school.city, school.state].filter(Boolean).join(", ") || "Location not set"}</p><p className="mt-1 truncate text-xs text-muted-foreground">{school.address || "Address not set"}</p></div>
-                <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</p><p className="mt-1 text-sm">{statusLabel(school.school_status)}</p></div>
-                <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Students</p><p className="mt-1 text-sm tabular-nums">{count(school.student_count)}</p></div>
-                <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Staff</p><p className="mt-1 text-sm tabular-nums">{count(school.teacher_count)} teachers · {count(school.principal_count)} principals</p><p className="mt-1 text-xs text-muted-foreground">{school.principal_names || "Principal not assigned"}</p></div>
-                <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Classes · attendance today</p><p className="mt-1 text-sm tabular-nums">{count(school.class_count)} · {attendance === null ? "No records" : attendance + "%"}</p></div>
-                <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => openSchool(school.school_id)}>Open school <ArrowUpRight className="ml-1 h-3.5 w-3.5" /></Button><Button variant="outline" size="sm" onClick={() => { setInviteSchool(school); setInviteEmail(""); }}>Prepare principal invite</Button></div>
-              </article>;
-            })}</div>
-          )}
-        </section>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading franchise overview…</p>
+        ) : overview && overview.school_count === 0 ? (
+          <Panel className="flex flex-col items-center px-6 py-12 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy-soft text-navy"><Rocket className="h-6 w-6" /></span>
+            <p className="mt-4 font-display text-base font-semibold">Welcome to your franchise</p>
+            <p className="mt-1 max-w-md text-sm text-muted-foreground">Get started by requesting your first school. It will appear here once submitted.</p>
+            <Button className="mt-5" asChild><Link href="/franchise/schools">Request a school</Link></Button>
+          </Panel>
+        ) : overview ? (
+          <StatGrid items={[
+            ["Total Schools", n(overview.school_count), `${n(overview.active_school_count)} active · ${n(overview.pending_school_count)} pending`],
+            ["Students", n(overview.student_count)],
+            ["Teachers", n(overview.teacher_count), `${n(overview.principal_count)} principals`],
+            ["Attendance Today", overview.attendance_today_count ? `${Math.round((overview.attendance_today_present / overview.attendance_today_count) * 100)}%` : "—", `${n(overview.attendance_today_present)} / ${n(overview.attendance_today_count)} marked`],
+          ]} />
+        ) : null}
 
-        <section className="grid gap-4 lg:grid-cols-2">
-          <article className="surface-panel p-5"><h2 className="font-display font-semibold">Recent network activity</h2><p className="mt-1 text-xs text-muted-foreground">School record creation is the available activity signal; no administrative audit feed is configured.</p>{loading ? <p className="mt-4 text-sm text-muted-foreground">Loading…</p> : error ? <p className="mt-4 text-sm text-muted-foreground">Unavailable while network data is loading.</p> : schools.length ? <ul className="mt-4 space-y-3">{schools.slice(0, 5).map((school) => <li key={school.school_id} className="flex justify-between gap-3 text-sm"><span className="truncate">{school.school_name} added to records</span><time className="shrink-0 text-muted-foreground">{new Date(school.school_created_at).toLocaleDateString("en-IN")}</time></li>)}</ul> : <p className="mt-4 text-sm text-muted-foreground">No recent school records are available.</p>}</article>
-          <article className="surface-panel p-5"><h2 className="font-display font-semibold">Onboarding & tasks</h2><p className="mt-1 text-xs text-muted-foreground">Onboarding is derived from each assigned school’s database status.</p><p className="mt-4 text-sm">{loading ? "Loading onboarding status…" : error ? "Onboarding status unavailable." : count(pending) + " assigned school" + (pending === 1 ? "" : "s") + " pending onboarding"}</p><p className="mt-3 text-sm text-muted-foreground">Network-wide task assignments and live network reports are not connected to a franchise scope, so no totals are shown.</p></article>
-        </section>
-        {inactive > 0 && <p className="text-xs text-muted-foreground">Inactive assigned schools: {count(inactive)}. They remain visible for monitoring.</p>}
+        {attention.length > 0 && (
+          <Panel title="Needs attention" subtitle={`${attention.length} item${attention.length === 1 ? "" : "s"} require your review`}>
+            <ul className="divide-y divide-border">
+              {attention.map((item, i) => (
+                <li key={`${item.kind}-${item.school_id}-${i}`} className="flex flex-wrap items-start gap-3 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">{item.school_name}</p>
+                    <p className="mt-0.5 text-muted-foreground">{item.detail}</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    if (item.kind === "school_declined" || item.kind === "school_pending_approval") router.push(`/franchise/schools/${item.school_id}`);
+                    else openSchool(item.school_id);
+                  }}>View</Button>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+
+        {!loading && sorted.length > 0 && (
+          <Panel title="School comparison" action={
+            <div className="flex gap-1">
+              {(["name", "students", "attendance"] as const).map((key) => (
+                <button key={key} onClick={() => setSortKey(key)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${sortKey === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary"}`}>
+                  {key === "name" ? "Name" : key === "students" ? "Students" : "Attendance"}
+                </button>
+              ))}
+            </div>
+          }>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px] text-sm">
+                <thead className="bg-surface text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">School</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Students</th>
+                    <th className="px-4 py-3 font-medium">Teachers</th>
+                    <th className="px-4 py-3 font-medium">Att. 30d</th>
+                    <th className="px-4 py-3 font-medium">Enquiries</th>
+                    <th className="px-4 py-3 font-medium" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((row) => (
+                    <tr key={row.school_id} className="border-t border-border transition-colors hover:bg-surface">
+                      <td className="px-4 py-3">
+                        <p className="font-medium">{row.name}</p>
+                        <p className="text-xs text-muted-foreground">{row.code}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Pill tone={row.status === "active" ? "navy" : row.status === "rejected" ? "red" : "muted"}>{row.status}</Pill>
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">{n(row.student_count)}</td>
+                      <td className="px-4 py-3 tabular-nums">{n(row.teacher_count)}{!row.has_principal && <span className="ml-1 text-xs text-destructive">No principal</span>}</td>
+                      <td className="px-4 py-3 tabular-nums">{pct(row.attendance_pct_30d)}</td>
+                      <td className="px-4 py-3 tabular-nums">{n(row.open_enquiries)}</td>
+                      <td className="px-4 py-3">
+                        <Button variant="outline" size="sm" onClick={() => openSchool(row.school_id)}><ArrowUpRight className="h-3.5 w-3.5" /></Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Panel title="Recent activity">
+            {activityQuery.isPending ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : activity.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No recent activity recorded.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {activity.slice(0, 10).map((item) => (
+                  <li key={item.id} className="flex justify-between gap-3 py-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{item.what}</p>
+                      <p className="truncate text-xs text-muted-foreground">{item.actor_name} · {item.school_name}</p>
+                    </div>
+                    <time className="shrink-0 text-xs text-muted-foreground">{new Date(item.occurred_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel title="Quick links">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { label: "Schools", to: "/franchise/schools", icon: Building2, desc: "Request & manage schools" },
+                { label: "Team", to: "/franchise/team", icon: Users, desc: "Staff across all schools" },
+                { label: "Attendance", to: "/franchise/reports", icon: ClipboardCheck, desc: "Cross-school reports" },
+                { label: "Settings", to: "/franchise/settings", icon: GraduationCap, desc: "Franchise profile" },
+              ].map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Link key={link.to} href={link.to} className="surface-panel flex items-center gap-3 rounded-lg p-4 transition-colors hover:bg-secondary">
+                    <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">{link.label}</p>
+                      <p className="text-xs text-muted-foreground">{link.desc}</p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </Panel>
+        </div>
       </div>
-      <Dialog open={!!inviteSchool} onOpenChange={(open) => { if (!open && !inviteLoading) setInviteSchool(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Prepare principal signup</DialogTitle>
-            <DialogDescription>For {inviteSchool?.school_name}. This saves an authorized school invite record; it does not send an email. The invitee must sign up with this email. Existing accounts need an authorized administrator to provision access.</DialogDescription>
-          </DialogHeader>
-          <label className="space-y-2 text-sm font-medium">Principal email<Input type="email" autoComplete="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required /></label>
-          <DialogFooter><Button variant="outline" onClick={() => setInviteSchool(null)} disabled={inviteLoading}>Cancel</Button><Button onClick={() => void createPrincipalInvite()} disabled={inviteLoading || !inviteEmail.trim()}>{inviteLoading ? "Saving…" : "Save invite record"}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </AppShell>
   );
 }
